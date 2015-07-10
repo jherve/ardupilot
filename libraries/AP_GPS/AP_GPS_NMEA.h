@@ -66,10 +66,11 @@ public:
 private:
     /// Coding for the GPS sentences that the parser handles
     enum _sentence_types {      //there are some more than 10 fields in some sentences , thus we have to increase these value.
-        _GPS_SENTENCE_GPRMC = 32,
-        _GPS_SENTENCE_GPGGA = 64,
-        _GPS_SENTENCE_GPVTG = 96,
-        _GPS_SENTENCE_OTHER = 0
+        _GPS_SENTENCE_GPRMC   = 32,
+        _GPS_SENTENCE_GPGGA   = 64,
+        _GPS_SENTENCE_GPVTG   = 96,
+        _GPS_SENTENCE_PERDCRV = 128,
+        _GPS_SENTENCE_OTHER   = 0
     };
 
     /// Update the decode state machine with a new character
@@ -125,6 +126,7 @@ private:
     uint8_t _term_number;                                       ///< term index within the current sentence
     uint8_t _term_offset;                                       ///< character offset with the term being received
     bool _gps_data_good;                                        ///< set when the sentence indicates data is good
+    bool _have_perdcrv;
 
     // The result of parsing terms within a message is stored temporarily until
     // the message is completely processed and the checksum validated.
@@ -136,6 +138,9 @@ private:
     int32_t _new_altitude;                                      ///< altitude parsed from a term
     int32_t _new_speed;                                                 ///< speed parsed from a term
     int32_t _new_course;                                        ///< course parsed from a term
+    int32_t _new_velocity_x;                            ///< velocity x parsed from a term
+    int32_t _new_velocity_y;                            ///< velocity y parsed from a term
+    int32_t _new_velocity_z;                            ///< velocity z parsed from a term
     uint16_t _new_hdop;                                                 ///< HDOP parsed from a term
     uint8_t _new_satellite_count;                       ///< satellite count parsed from a term
 
