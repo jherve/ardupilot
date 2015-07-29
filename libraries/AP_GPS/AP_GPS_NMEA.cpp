@@ -323,6 +323,8 @@ bool AP_GPS_NMEA::_term_complete()
                     state.velocity.y = _new_velocity_y*0.01f;
                     state.velocity.z = _new_velocity_z*0.01f;
                     state.have_vertical_velocity = true;
+                    state.speed_accuracy = _new_speed_accuracy*0.01f;
+                    state.have_speed_accuracy = true;
                     break;
                 }
             } else {
@@ -438,6 +440,9 @@ bool AP_GPS_NMEA::_term_complete()
             break;
         case _GPS_SENTENCE_PERDCRV + 5:
             _new_velocity_z = -_parse_decimal_100(); // Velocity z (PERDCRV)
+            break;
+        case _GPS_SENTENCE_PERDCRV + 6:
+            _new_speed_accuracy = _parse_decimal_100();
             break;
         }
     }
