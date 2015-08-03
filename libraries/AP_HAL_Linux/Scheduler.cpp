@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <sys/mman.h>
+#include <iostream>
 
 using namespace Linux;
 
@@ -39,9 +40,6 @@ extern const AP_HAL::HAL& hal;
 #define APM_LINUX_TONEALARM_PERIOD      10000
 #define APM_LINUX_IO_PERIOD             20000
 #endif // CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO || CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ERLEBRAIN2
-
-
-
 
 Scheduler::Scheduler()
 {}
@@ -256,6 +254,8 @@ void Scheduler::resume_timer_procs()
 
 void Scheduler::_run_timers(bool called_from_timer_thread)
 {
+    int i;
+
     if (_in_timer_proc) {
         return;
     }
@@ -265,7 +265,7 @@ void Scheduler::_run_timers(bool called_from_timer_thread)
         printf("Failed to take timer semaphore in _run_timers\n");
     }
     // now call the timer based drivers
-    for (int i = 0; i < _num_timer_procs; i++) {
+    for (i = 0; i < _num_timer_procs; i++) {
         if (_timer_proc[i]) {
             _timer_proc[i]();
         }
