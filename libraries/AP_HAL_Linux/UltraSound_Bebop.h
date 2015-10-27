@@ -2,6 +2,9 @@
 #ifndef __AP_HAL_LINUX_ULTRASOUND_BEBOP_H__
 #define __AP_HAL_LINUX_ULTRASOUND_BEBOP_H__
 
+#include <stdint.h>
+#include <linux/spi/spidev.h>
+
 /*
  * the number of p7s in the iio buffer
  */
@@ -83,6 +86,19 @@
 /* count this times before switching mode */
 #define P7_US_TRANSITION_COUNT 5
 
+
+/*
+ * struct related to ultrasoud echo
+ */
+struct echo {
+    uint16_t start_idx;
+    uint16_t stop_idx;
+    int32_t max_value;
+    uint16_t max_idx;
+    uint16_t previous;
+    int16_t d_echo;
+};
+
 /*
  * struct related to adc
  * data to receive and process adc datas
@@ -129,7 +145,6 @@ struct spi_info {
     struct spi_ioc_transfer tr;
     struct spi_ioc_transfer tr_purge;
 };
-
 
 class UltraSound_Bebop {
 public:

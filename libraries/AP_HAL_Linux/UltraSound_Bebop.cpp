@@ -1,4 +1,4 @@
-#include "UltraSound_Bebop.h"
+
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -14,6 +14,8 @@
 #include <float.h>
 #include <math.h>
 #include <time.h>
+#include "UltraSound_Bebop.h"
+#include "IIO.h"
 
 #define ULOG(_fmt, ...)   fprintf(stderr, _fmt "\n", ##__VA_ARGS__)
 /** Log as debug */
@@ -30,16 +32,88 @@
 #define ECHO_PREVIOUS_BETTER 0x40
 #define ECHO_FOLLOWING_BETTER 0x80
 
+
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P2_1200 1200, 1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P4_1200 P2_1200, P2_1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P8_1200 P4_1200, P4_1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P16_1200 P8_1200, P8_1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P32_1200 P16_1200, P16_1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P64_1200 P32_1200, P32_1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P128_1200 P64_1200, P64_1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P256_1200 P128_1200, P128_1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P512_1200 P256_1200, P256_1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P1024_1200 P512_1200, P512_1200
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P2048_1200 P1024_1200, P1024_1200
+
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P2_4195 4195, 4195
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P4_4195 P2_4195, P2_4195
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P8_4195 P4_4195, P4_4195
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P16_4195 P8_4195, P8_4195
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P32_4195 P16_4195, P16_4195
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P64_4195 P32_4195, P32_4195
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P128_4195 P64_4195, P64_4195
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P256_4195 P128_4195, P128_4195
+/* codecheck_ignore[COMPLEX_MACRO] */
+#define P512_4195 P256_4195, P256_4195
+
 /*
- * struct related to ultrasoud echo
+ * threshold are values to compare with adc datas
  */
-struct echo {
-    uint16_t start_idx;
-    uint16_t stop_idx;
-    int32_t max_value;
-    uint16_t max_idx;
-    uint16_t previous;
-    int16_t d_echo;
+static unsigned short thresholds[2][2048] = {
+    {
+        P128_4195,
+        P8_4195,
+        P2_4195,
+        4195,
+        4000, 3800, 3600, 3400, 3200, 3000, 2800,
+        2600, 2400, 2200, 2000, 1800, 1600, 1400,
+        P1024_1200,
+        P512_1200,
+        P256_1200,
+        P64_1200,
+        P16_1200,
+        P16_1200,
+        P4_1200,
+        P2_1200,
+        1200,
+    },
+    {
+        P64_4195,
+        P8_4195,
+        4195,
+        4190, 4158, 4095, 4095, 4095, 4095, 4095, 4095, 4095,
+        4095, 4090, 4058, 3943, 3924, 3841, 3679, 3588, 3403,
+        3201, 3020, 2816, 2636, 2448, 2227, 2111, 1955, 1819,
+        1675, 1540, 1492, 1374, 1292,
+        P512_1200,
+        P512_4195,
+        P512_4195,
+        P256_4195,
+        P128_4195,
+        P16_4195,
+        P4_4195,
+        P2_4195,
+        4195,
+    },
 };
 
 /*
@@ -47,14 +121,6 @@ struct echo {
  */
 int UltraSound_Bebop::launch_purge()
 {
-    /*
-    snprintf(buf, sizeof(buf), "/sys/bus/iio/devices/%s/%s",
-                    dev->id, "buffer/enable");
-    f = fopen(buf, "w");
-    ret = fwrite(src, 1, len, f);
-    fflush(f);
-    fclose(f);
-    */
     iio_device_attr_write(_adc.device, "buffer/enable", "1");
     return ioctl(_spi.fd, SPI_IOC_MESSAGE(1), &_spi.tr_purge);
 }
@@ -205,7 +271,7 @@ int UltraSound_Bebop::configure_capture()
 
     _adc.filter_buffer_size =
         _adc.buffer_size >> P7_US_FILTER_POWER;
-    _adc.filter_buffer = calloc(1,
+    _adc.filter_buffer = (unsigned short *) calloc(1,
             sizeof(_adc.filter_buffer[0])
             * _adc.filter_buffer_size);
     if (!_adc.filter_buffer) {
@@ -268,14 +334,6 @@ int UltraSound_Bebop::capture()
     return ret;
 }
 
-
-
-static int f_is_zero(const float f)
-{
-    return fabsf(f) < FLT_EPSILON;
-}
-
-
 UltraSound_Bebop::~UltraSound_Bebop()
 {
     close(_spi.fd);
@@ -286,5 +344,3 @@ UltraSound_Bebop::~UltraSound_Bebop()
     iio_context_destroy(_iio);
     _iio = NULL;
 }
-
-
