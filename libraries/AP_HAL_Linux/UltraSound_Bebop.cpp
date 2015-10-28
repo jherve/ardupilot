@@ -1,4 +1,5 @@
 
+#include <AP_HAL/AP_HAL.h>
 
 #include <stdlib.h>
 #include <unistd.h>
@@ -16,6 +17,9 @@
 #include <time.h>
 #include "UltraSound_Bebop.h"
 #include "IIO.h"
+
+
+extern const AP_HAL::HAL& hal;
 
 #define ULOG(_fmt, ...)   fprintf(stderr, _fmt "\n", ##__VA_ARGS__)
 /** Log as debug */
@@ -122,7 +126,7 @@ static unsigned short thresholds[2][2048] = {
 int UltraSound_Bebop::launch_purge()
 {
     iio_device_attr_write(_adc.device, "buffer/enable", "1");
-    return ioctl(_spi.fd, SPI_IOC_MESSAGE(1), &_spi.tr_purge);
+    return ioctl(_spi_old.fd, SPI_IOC_MESSAGE(1), &_spi_old.tr_purge);
 }
 
 void UltraSound_Bebop::configure_gpio(int value)
@@ -162,7 +166,7 @@ void UltraSound_Bebop::reconfigure_wave()
     if (capture() < 0)
         ULOGE("purge could not capture data");
     /* configure the output buffer with a new mode */
-    _spi.tr.tx_buf = (unsigned long)_spi.tx[_mode];
+    _spi_old.tr.tx_buf = (unsigned long)_spi_old.tx[_mode];
     _adc.thresholds = thresholds[_mode];
     switch (_mode) {
     case 1: /* low voltage */
@@ -189,39 +193,39 @@ int UltraSound_Bebop::configure_wave()
     configure_gpio(0);
 
     /* configure spi device */
-    _spi.fd = open(spiname, O_RDWR);
-    if (_spi.fd < 0) {
-        ULOGE("spidev_init: ERROR[%d], failed to open", _spi.fd);
+    _spi_old.fd = open(spiname, O_RDWR);
+    if (_spi_old.fd < 0) {
+        ULOGE("spidev_init: ERROR[%d], failed to open", _spi_old.fd);
         return -1;
     }
 
-    memset(_spi.tx[0], 0xF0, 16);
-    memset(_spi.tx[1], 0xF0, 4);
-    memset(_spi.purge, 0xFF, P7_US_NB_PULSES_PURGE);
-    _spi.tr.tx_buf = (unsigned long)_spi.tx[_mode];
-    _spi.tr.len = P7_US_NB_PULSES_MAX;
-    _spi.tr.rx_buf = (unsigned long)NULL;
-    _spi.tr.delay_usecs = 0;
-    _spi.tr.speed_hz = P7_US_SPI_SPEED;
-    _spi.tr.bits_per_word = 8;
-    _spi.tr.cs_change = 1;
+    memset(_spi_old.tx[0], 0xF0, 16);
+    memset(_spi_old.tx[1], 0xF0, 4);
+    memset(_spi_old.purge, 0xFF, P7_US_NB_PULSES_PURGE);
+    _spi_old.tr.tx_buf = (unsigned long)_spi_old.tx[_mode];
+    _spi_old.tr.len = P7_US_NB_PULSES_MAX;
+    _spi_old.tr.rx_buf = (unsigned long)NULL;
+    _spi_old.tr.delay_usecs = 0;
+    _spi_old.tr.speed_hz = P7_US_SPI_SPEED;
+    _spi_old.tr.bits_per_word = 8;
+    _spi_old.tr.cs_change = 1;
     _adc.thresholds = thresholds[_mode];
 
-    _spi.tr_purge.tx_buf = (unsigned long)_spi.purge;
-    _spi.tr_purge.rx_buf = (unsigned long)NULL;
-    _spi.tr_purge.delay_usecs = 0;
-    _spi.tr_purge.speed_hz = P7_US_SPI_SPEED;
-    _spi.tr_purge.bits_per_word = 8;
-    _spi.tr_purge.cs_change = 1;
-    _spi.tr_purge.len = P7_US_NB_PULSES_PURGE;
+    _spi_old.tr_purge.tx_buf = (unsigned long)_spi_old.purge;
+    _spi_old.tr_purge.rx_buf = (unsigned long)NULL;
+    _spi_old.tr_purge.delay_usecs = 0;
+    _spi_old.tr_purge.speed_hz = P7_US_SPI_SPEED;
+    _spi_old.tr_purge.bits_per_word = 8;
+    _spi_old.tr_purge.cs_change = 1;
+    _spi_old.tr_purge.len = P7_US_NB_PULSES_PURGE;
 
-    if (ioctl(_spi.fd, SPI_IOC_WR_MODE, &spi_mode)
-            || ioctl(_spi.fd, SPI_IOC_WR_BITS_PER_WORD,
-                &_spi.tr.bits_per_word)
-            || ioctl(_spi.fd, SPI_IOC_WR_MAX_SPEED_HZ,
-                &_spi.tr.speed_hz)) {
+    if (ioctl(_spi_old.fd, SPI_IOC_WR_MODE, &spi_mode)
+            || ioctl(_spi_old.fd, SPI_IOC_WR_BITS_PER_WORD,
+                &_spi_old.tr.bits_per_word)
+            || ioctl(_spi_old.fd, SPI_IOC_WR_MAX_SPEED_HZ,
+                &_spi_old.tr.speed_hz)) {
         ULOGE("spidev_init: ERROR, failed to configure %s", spiname);
-        close(_spi.fd);
+        close(_spi_old.fd);
         return -1;
     }
     return 0;
@@ -296,6 +300,20 @@ UltraSound_Bebop::UltraSound_Bebop()
 {
     _mode = P7_US_DEFAULT_MODE;
     _freq = P7_US_DEFAULT_FREQ;
+    /* SPI can not be initialized just yet */
+    _spi = nullptr;
+}
+
+void UltraSound_Bebop::init()
+{
+    _spi = hal.spi->device(AP_HAL::SPIDevice_BebopUltraSound);
+    if (_spi == NULL) {
+        hal.scheduler->panic("Could not find SPI device for Bebop ultrasound");
+
+        return; /* never reached */
+    }
+    _spi->init();
+
     if (configure_capture() < 0)
         goto error_free_us;
 
@@ -318,7 +336,7 @@ error_free_us:
 int UltraSound_Bebop::launch()
 {
     iio_device_attr_write(_adc.device, "buffer/enable", "1");
-    return ioctl(_spi.fd, SPI_IOC_MESSAGE(1), &_spi.tr);
+    return ioctl(_spi_old.fd, SPI_IOC_MESSAGE(1), &_spi_old.tr);
 }
 
 /*
@@ -336,7 +354,7 @@ int UltraSound_Bebop::capture()
 
 UltraSound_Bebop::~UltraSound_Bebop()
 {
-    close(_spi.fd);
+    close(_spi_old.fd);
     iio_buffer_destroy(_adc.buffer);
     _adc.buffer = NULL;
     free(_adc.filter_buffer);

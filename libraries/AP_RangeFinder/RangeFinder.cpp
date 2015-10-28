@@ -23,6 +23,7 @@
 #include "AP_RangeFinder_BBB_PRU.h"
 #include "AP_RangeFinder_LightWareI2C.h"
 #include "AP_RangeFinder_LightWareSerial.h"
+#include "AP_RangeFinder_AnalogSonar.h"
 
 // table of user settable parameters
 const AP_Param::GroupInfo RangeFinder::var_info[] = {
@@ -529,7 +530,16 @@ void RangeFinder::detect_instance(uint8_t instance)
             drivers[instance] = new AP_RangeFinder_LightWareSerial(*this, instance, state[instance], serial_manager);
             return;
         }
-    } 
+    }
+#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP
+    if (type == RangeFinder_TYPE_ANALOG_SONAR) {
+        if (AP_RangeFinder_AnalogSonar::detect(*this, instance)) {
+            state[instance].instance = instance;
+            drivers[instance] = new AP_RangeFinder_AnalogSonar(*this, instance, state[instance]);
+            return;
+        }
+    }
+#endif
     if (type == RangeFinder_TYPE_ANALOG) {
         // note that analog must be the last to be checked, as it will
         // always come back as present if the pin is valid

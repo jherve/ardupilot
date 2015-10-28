@@ -151,13 +151,15 @@ public:
     UltraSound_Bebop();
     ~UltraSound_Bebop();
 
+    void init(void);
     int launch(void);
     int capture(void);
     void wave_test(unsigned int);
 
 private:
     struct adc_info _adc;
-    struct spi_info _spi;
+    struct spi_info _spi_old;
+    AP_HAL::SPIDeviceDriver *_spi;
     struct iio_context *_iio;
     int _mode;
     int _freq;

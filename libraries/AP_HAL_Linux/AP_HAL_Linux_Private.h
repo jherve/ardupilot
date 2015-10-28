@@ -32,6 +32,7 @@
 #include "Semaphores.h"
 #include "Scheduler.h"
 #include "ToneAlarmDriver.h"
+#include "UltraSound_Bebop.h"
 #include "Util.h"
 #include "Util_RPI.h"
 #include "Heat.h"

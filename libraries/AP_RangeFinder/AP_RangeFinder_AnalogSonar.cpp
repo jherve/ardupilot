@@ -34,7 +34,9 @@ AP_RangeFinder_AnalogSonar::AP_RangeFinder_AnalogSonar(RangeFinder &_ranger,
                                         RangeFinder::RangeFinder_State &_state) :
     AP_RangeFinder_Backend(_ranger, instance, _state),
     _last_max_distance_cm(-1),
-    _last_min_distance_cm(-1)
+    _last_min_distance_cm(-1),
+    _last_timestamp(0),
+    _fd(-1)
 {
 
 }
@@ -51,6 +53,7 @@ AP_RangeFinder_AnalogSonar::~AP_RangeFinder_AnalogSonar()
 */
 bool AP_RangeFinder_AnalogSonar::detect(RangeFinder &_ranger, uint8_t instance)
 {
+    return true;
 }
 
 void AP_RangeFinder_AnalogSonar::update(void)
