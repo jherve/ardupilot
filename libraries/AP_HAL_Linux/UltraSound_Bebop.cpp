@@ -186,11 +186,13 @@ void UltraSound_Bebop::reconfigure_wave()
  */
 int UltraSound_Bebop::configure_wave()
 {
+    configure_gpio(0);
+    _adc.thresholds = thresholds[_mode];
+#ifdef OLD_SPI
     const char *spiname = "/dev/spidev1.0";
     int spi_mode = 0;
     /* output configuration */
     /* low level mode by default */
-    configure_gpio(0);
 
     /* configure spi device */
     _spi_old.fd = open(spiname, O_RDWR);
@@ -209,7 +211,6 @@ int UltraSound_Bebop::configure_wave()
     _spi_old.tr.speed_hz = P7_US_SPI_SPEED;
     _spi_old.tr.bits_per_word = 8;
     _spi_old.tr.cs_change = 1;
-    _adc.thresholds = thresholds[_mode];
 
     _spi_old.tr_purge.tx_buf = (unsigned long)_spi_old.purge;
     _spi_old.tr_purge.rx_buf = (unsigned long)NULL;
@@ -228,6 +229,7 @@ int UltraSound_Bebop::configure_wave()
         close(_spi_old.fd);
         return -1;
     }
+#endif
     return 0;
 }
 
@@ -302,6 +304,9 @@ UltraSound_Bebop::UltraSound_Bebop()
     _freq = P7_US_DEFAULT_FREQ;
     /* SPI can not be initialized just yet */
     _spi = nullptr;
+    memset(_tx[0], 0xF0, 16);
+    memset(_tx[1], 0xF0, 4);
+    memset(_purge, 0xFF, P7_US_NB_PULSES_PURGE);
 }
 
 void UltraSound_Bebop::init()
@@ -335,8 +340,12 @@ error_free_us:
  */
 int UltraSound_Bebop::launch()
 {
+#if 0
     iio_device_attr_write(_adc.device, "buffer/enable", "1");
     return ioctl(_spi_old.fd, SPI_IOC_MESSAGE(1), &_spi_old.tr);
+#endif
+    printf("Yep\n");
+    return 0;
 }
 
 /*

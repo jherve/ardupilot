@@ -15,6 +15,7 @@
  */
 
 #include <AP_HAL/AP_HAL.h>
+#include <AP_HAL_Linux/AP_HAL_Linux.h>
 
 #include "AP_RangeFinder_AnalogSonar.h"
 
@@ -28,6 +29,7 @@
 #include "AP_HAL_Linux/UltraSound_Bebop.h"
 
 extern const AP_HAL::HAL& hal;
+
 
 AP_RangeFinder_AnalogSonar::AP_RangeFinder_AnalogSonar(RangeFinder &_ranger,
                                         uint8_t instance,
@@ -58,6 +60,7 @@ bool AP_RangeFinder_AnalogSonar::detect(RangeFinder &_ranger, uint8_t instance)
 
 void AP_RangeFinder_AnalogSonar::update(void)
 {
+    AP_HAL_Linux.ultraSound->launch();
 }
 
 

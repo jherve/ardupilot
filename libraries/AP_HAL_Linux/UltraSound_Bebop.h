@@ -163,6 +163,8 @@ private:
     struct iio_context *_iio;
     int _mode;
     int _freq;
+    unsigned char _tx[2][P7_US_NB_PULSES_MAX];
+    char _purge[P7_US_NB_PULSES_PURGE];
 
     void configure_gpio(int value);
     int configure_wave();
