@@ -31,101 +31,11 @@ extern const AP_HAL::HAL& hal;
 /** Log as error */
 #define ULOGE(_fmt, ...)  ULOG("[E]" _fmt, ##__VA_ARGS__)
 
-/* flags to mark echoes */
-#define ECHO_REJECTED 0x20
-#define ECHO_PREVIOUS_BETTER 0x40
-#define ECHO_FOLLOWING_BETTER 0x80
-
-
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P2_1200 1200, 1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P4_1200 P2_1200, P2_1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P8_1200 P4_1200, P4_1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P16_1200 P8_1200, P8_1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P32_1200 P16_1200, P16_1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P64_1200 P32_1200, P32_1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P128_1200 P64_1200, P64_1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P256_1200 P128_1200, P128_1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P512_1200 P256_1200, P256_1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P1024_1200 P512_1200, P512_1200
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P2048_1200 P1024_1200, P1024_1200
-
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P2_4195 4195, 4195
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P4_4195 P2_4195, P2_4195
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P8_4195 P4_4195, P4_4195
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P16_4195 P8_4195, P8_4195
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P32_4195 P16_4195, P16_4195
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P64_4195 P32_4195, P32_4195
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P128_4195 P64_4195, P64_4195
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P256_4195 P128_4195, P128_4195
-/* codecheck_ignore[COMPLEX_MACRO] */
-#define P512_4195 P256_4195, P256_4195
-
-/*
- * threshold are values to compare with adc datas
- */
-static unsigned short thresholds[2][2048] = {
-    {
-        P128_4195,
-        P8_4195,
-        P2_4195,
-        4195,
-        4000, 3800, 3600, 3400, 3200, 3000, 2800,
-        2600, 2400, 2200, 2000, 1800, 1600, 1400,
-        P1024_1200,
-        P512_1200,
-        P256_1200,
-        P64_1200,
-        P16_1200,
-        P16_1200,
-        P4_1200,
-        P2_1200,
-        1200,
-    },
-    {
-        P64_4195,
-        P8_4195,
-        4195,
-        4190, 4158, 4095, 4095, 4095, 4095, 4095, 4095, 4095,
-        4095, 4090, 4058, 3943, 3924, 3841, 3679, 3588, 3403,
-        3201, 3020, 2816, 2636, 2448, 2227, 2111, 1955, 1819,
-        1675, 1540, 1492, 1374, 1292,
-        P512_1200,
-        P512_4195,
-        P512_4195,
-        P256_4195,
-        P128_4195,
-        P16_4195,
-        P4_4195,
-        P2_4195,
-        4195,
-    },
-};
-
 /*
  * purge is used when changing mode
  */
 int UltraSound_Bebop::launch_purge()
 {
-    printf("UltraSound_Bebop::launch_purge()\n");
     iio_device_attr_write(_adc.device, "buffer/enable", "1");
     _spi->transfer(_purge, P7_US_NB_PULSES_PURGE);
     return 0;
@@ -161,7 +71,6 @@ void UltraSound_Bebop::configure_gpio(int value)
  */
 void UltraSound_Bebop::reconfigure_wave()
 {
-    printf("UltraSound_Bebop::reconfigure_wave()\n");
     /* configure the output buffer for a purge */
     /* perform a purge */
     if (launch_purge() < 0)
@@ -170,7 +79,6 @@ void UltraSound_Bebop::reconfigure_wave()
         ULOGE("purge could not capture data");
     /* configure the output buffer with a new mode */
     _spi_old.tr.tx_buf = (unsigned long)_spi_old.tx[_mode];
-    _adc.thresholds = thresholds[_mode];
     switch (_mode) {
     case 1: /* low voltage */
         configure_gpio(0);
@@ -190,49 +98,6 @@ void UltraSound_Bebop::reconfigure_wave()
 int UltraSound_Bebop::configure_wave()
 {
     configure_gpio(0);
-    _adc.thresholds = thresholds[_mode];
-#ifdef OLD_SPI
-    const char *spiname = "/dev/spidev1.0";
-    int spi_mode = 0;
-    /* output configuration */
-    /* low level mode by default */
-
-    /* configure spi device */
-    _spi_old.fd = open(spiname, O_RDWR);
-    if (_spi_old.fd < 0) {
-        ULOGE("spidev_init: ERROR[%d], failed to open", _spi_old.fd);
-        return -1;
-    }
-
-    memset(_spi_old.tx[0], 0xF0, 16);
-    memset(_spi_old.tx[1], 0xF0, 4);
-    memset(_spi_old.purge, 0xFF, P7_US_NB_PULSES_PURGE);
-    _spi_old.tr.tx_buf = (unsigned long)_spi_old.tx[_mode];
-    _spi_old.tr.len = P7_US_NB_PULSES_MAX;
-    _spi_old.tr.rx_buf = (unsigned long)NULL;
-    _spi_old.tr.delay_usecs = 0;
-    _spi_old.tr.speed_hz = P7_US_SPI_SPEED;
-    _spi_old.tr.bits_per_word = 8;
-    _spi_old.tr.cs_change = 1;
-
-    _spi_old.tr_purge.tx_buf = (unsigned long)_spi_old.purge;
-    _spi_old.tr_purge.rx_buf = (unsigned long)NULL;
-    _spi_old.tr_purge.delay_usecs = 0;
-    _spi_old.tr_purge.speed_hz = P7_US_SPI_SPEED;
-    _spi_old.tr_purge.bits_per_word = 8;
-    _spi_old.tr_purge.cs_change = 1;
-    _spi_old.tr_purge.len = P7_US_NB_PULSES_PURGE;
-
-    if (ioctl(_spi_old.fd, SPI_IOC_WR_MODE, &spi_mode)
-            || ioctl(_spi_old.fd, SPI_IOC_WR_BITS_PER_WORD,
-                &_spi_old.tr.bits_per_word)
-            || ioctl(_spi_old.fd, SPI_IOC_WR_MAX_SPEED_HZ,
-                &_spi_old.tr.speed_hz)) {
-        ULOGE("spidev_init: ERROR, failed to configure %s", spiname);
-        close(_spi_old.fd);
-        return -1;
-    }
-#endif
     return 0;
 }
 
@@ -298,6 +163,12 @@ error_destroy_context:
     return -1;
 }
 
+
+unsigned int UltraSound_Bebop::get_buffer_size()
+{
+    return _adc.buffer_size;
+}
+
 /*
  * Initialize the us
  */
@@ -316,7 +187,6 @@ UltraSound_Bebop::UltraSound_Bebop()
 
 void UltraSound_Bebop::init()
 {
-    printf("UltraSound_Bebop::init()\n");
     _spi = hal.spi->device(AP_HAL::SPIDevice_BebopUltraSound);
     if (_spi == NULL) {
         hal.scheduler->panic("Could not find SPI device for Bebop ultrasound");
@@ -348,10 +218,6 @@ error_free_us:
  */
 int UltraSound_Bebop::launch()
 {
-#ifdef OLD_SPI
-    return ioctl(_spi_old.fd, SPI_IOC_MESSAGE(1), &_spi_old.tr);
-#endif
-    printf("UltraSound_Bebop::launch()\n");
     iio_device_attr_write(_adc.device, "buffer/enable", "1");
     _spi->transfer(_tx_buf, P7_US_NB_PULSES_MAX);
     return 0;
@@ -364,7 +230,6 @@ int UltraSound_Bebop::launch()
 int UltraSound_Bebop::capture()
 {
     int ret;
-    printf("UltraSound_Bebop::capture()\n");
 
     ret = iio_buffer_refill(_adc.buffer);
     iio_device_attr_write(_adc.device, "buffer/enable", "0");
@@ -377,9 +242,26 @@ static int f_is_zero(const float f)
 }
 
 
-void UltraSound_Bebop::update_mode(float altitude)
+struct iio_buffer* UltraSound_Bebop::get_buffer()
 {
-    printf("UltraSound_Bebop::update_mode()\n");
+    return _adc.buffer;
+}
+
+struct iio_channel* UltraSound_Bebop::get_channel()
+{
+    return _adc.channel;
+}
+unsigned short UltraSound_Bebop::get_threshold_time_rejection()
+{
+    return _adc.threshold_time_rejection;
+}
+unsigned int UltraSound_Bebop::get_adc_freq()
+{
+    return _adc.freq;
+}
+
+int UltraSound_Bebop::update_mode(float altitude)
+{
     switch (_mode) {
     case 0:
         if (altitude < P7_US_TRANSITION_HIGH_TO_LOW
@@ -414,6 +296,7 @@ void UltraSound_Bebop::update_mode(float altitude)
         }
         break;
     }
+    return _mode;
 }
 
 UltraSound_Bebop::~UltraSound_Bebop()

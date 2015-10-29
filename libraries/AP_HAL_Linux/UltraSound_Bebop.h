@@ -88,18 +88,6 @@
 
 
 /*
- * struct related to ultrasoud echo
- */
-struct echo {
-    uint16_t start_idx;
-    uint16_t stop_idx;
-    int32_t max_value;
-    uint16_t max_idx;
-    uint16_t previous;
-    int16_t d_echo;
-};
-
-/*
  * struct related to adc
  * data to receive and process adc datas
  */
@@ -116,16 +104,6 @@ struct adc_info {
     unsigned short *filter_buffer;
     unsigned int filter_buffer_size;
 
-    /* step 2 search echoes */
-    struct echo echoes[P7_US_MAX_ECHOES];
-    int nb_echoes;
-
-    /* step 3 match with previous capture */
-    struct echo echoes_old[P7_US_MAX_ECHOES];
-    int nb_echoes_old;
-
-    /* step 4 select an echo and an altitude */
-    struct echo *echo_selected;
     float altitude;
 
     /* step 5 check if we should change the mode high or low mode */
@@ -154,11 +132,16 @@ public:
     void init(void);
     int launch(void);
     int capture(void);
-    void update_mode(float altitude);
+    int update_mode(float altitude);
     void wave_test(unsigned int);
-    struct adc_info _adc;
+    struct iio_buffer* get_buffer();
+    struct iio_channel* get_channel();
+    unsigned int get_buffer_size();
+    unsigned short get_threshold_time_rejection();
+    unsigned int get_adc_freq();
 
 private:
+    struct adc_info _adc;
     struct spi_info _spi_old;
     AP_HAL::SPIDeviceDriver *_spi;
     struct iio_context *_iio;

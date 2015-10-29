@@ -1711,3 +1711,164 @@ ssize_t iio_buffer_refill(struct iio_buffer *buffer)
     return read;
 }
 
+ptrdiff_t iio_buffer_step(const struct iio_buffer *buffer)
+{
+    return (ptrdiff_t) buffer->sample_size;
+}
+
+void * iio_buffer_end(const struct iio_buffer *buffer)
+{
+    return (void *) ((uintptr_t) buffer->buffer + buffer->data_length);
+}
+
+void * iio_buffer_first(const struct iio_buffer *buffer,
+        const struct iio_channel *chn)
+{
+    size_t len;
+    unsigned int i;
+    uintptr_t ptr = (uintptr_t) buffer->buffer;
+
+    if (!iio_channel_is_enabled(chn))
+        return iio_buffer_end(buffer);
+
+    for (i = 0; i < buffer->dev->nb_channels; i++) {
+        struct iio_channel *cur = buffer->dev->channels[i];
+        len = cur->format.length / 8;
+
+        /* NOTE: dev->channels are ordered by index */
+        if (cur->index < 0 || cur->index == chn->index)
+            break;
+
+        /* Test if the buffer has samples for this channel */
+        if (!TEST_BIT(buffer->mask, cur->index))
+            continue;
+
+        if (ptr % len)
+            ptr += len - (ptr % len);
+        ptr += len;
+    }
+
+    len = chn->format.length / 8;
+    if (ptr % len)
+        ptr += len - (ptr % len);
+    return (void *) ptr;
+}
+
+static void byte_swap(uint8_t *dst, const uint8_t *src, size_t len)
+{
+    size_t i;
+    for (i = 0; i < len; i++)
+        dst[i] = src[len - i - 1];
+}
+
+
+static void shift_bits(uint8_t *dst, size_t shift, size_t len, bool left)
+{
+    size_t i, shift_bytes = shift / 8;
+    shift %= 8;
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    if (!left)
+#else
+    if (left)
+#endif
+    {
+        if (shift_bytes) {
+            memmove(dst, dst + shift_bytes, len - shift_bytes);
+            memset(dst + len - shift_bytes, 0, shift_bytes);
+        }
+        if (shift) {
+            for (i = 0; i < len; i++) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+                dst[i] >>= shift;
+                if (i < len - 1)
+                    dst[i] |= dst[i + 1] << (8 - shift);
+#else
+                dst[i] <<= shift;
+                if (i < len - 1)
+                    dst[i] |= dst[i + 1] >> (8 - shift);
+#endif
+            }
+        }
+    } else {
+        if (shift_bytes) {
+            memmove(dst + shift_bytes, dst, len - shift_bytes);
+            memset(dst, 0, shift_bytes);
+        }
+        if (shift) {
+            for (i = len; i > 0; i--) {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+                dst[i - 1] <<= shift;
+                if (i > 1)
+                    dst[i - 1] |= dst[i - 2] >> (8 - shift);
+#else
+                dst[i - 1] >>= shift;
+                if (i > 1)
+                    dst[i - 1] |= dst[i - 2] << (8 - shift);
+#endif
+            }
+        }
+    }
+}
+
+static void sign_extend(uint8_t *dst, size_t bits, size_t len)
+{
+    size_t upper_bytes = ((len * 8 - bits) / 8);
+    uint8_t msb, msb_bit = 1 << ((bits - 1) % 8);
+
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    msb = dst[len - 1 - upper_bytes] & msb_bit;
+    if (upper_bytes)
+        memset(dst + len - upper_bytes, msb ? 0xff : 0x00, upper_bytes);
+    if (msb)
+        dst[len - 1 - upper_bytes] |= ~(msb_bit - 1);
+    else
+        dst[len - 1 - upper_bytes] &= (msb_bit - 1);
+#else
+    /* XXX: untested */
+    msb = dst[upper_bytes] & msb_bit;
+    if (upper_bytes)
+        memset(dst, msb ? 0xff : 0x00, upper_bytes);
+    if (msb)
+        dst[upper_bytes] |= ~(msb_bit - 1);
+#endif
+}
+
+static void mask_upper_bits(uint8_t *dst, size_t bits, size_t len)
+{
+    size_t i;
+
+    /* Clear upper bits */
+    if (bits % 8)
+        dst[bits / 8] &= (1 << (bits % 8)) - 1;
+
+    /* Clear upper bytes */
+    for (i = (bits + 7) / 8; i < len; i++)
+        dst[i] = 0;
+}
+
+void iio_channel_convert(const struct iio_channel *chn,
+        void *dst, const void *src)
+{
+    unsigned int len = chn->format.length / 8;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    bool swap = chn->format.is_be;
+#else
+    bool swap = !chn->format.is_be;
+#endif
+
+    if (len == 1 || !swap)
+        memcpy(dst, src, len);
+    else
+        byte_swap((unsigned char*) dst, (const unsigned char*) src, len);
+
+    if (chn->format.shift)
+        shift_bits((unsigned char*) dst, chn->format.shift, len, false);
+
+    if (!chn->format.is_fully_defined) {
+        if (chn->format.is_signed)
+            sign_extend((unsigned char*) dst, chn->format.bits, len);
+        else
+            mask_upper_bits((unsigned char*) dst, chn->format.bits, len);
+    }
+}

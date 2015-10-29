@@ -20,6 +20,23 @@
 #include "RangeFinder.h"
 #include "RangeFinder_Backend.h"
 
+/*
+ * the number of echoes we will keep at most
+ */
+#define P7_US_MAX_ECHOES 30
+/*
+ * struct related to ultrasoud echo
+ */
+struct echo {
+    uint16_t start_idx;
+    uint16_t stop_idx;
+    int32_t max_value;
+    uint16_t max_idx;
+    uint16_t previous;
+    int16_t d_echo;
+};
+
+
 class AP_RangeFinder_AnalogSonar : public AP_RangeFinder_Backend
 {
 public:
@@ -40,6 +57,24 @@ public:
 private:
     int _fd;
     uint64_t _last_timestamp;
+    unsigned short *_filter_buffer;
+    unsigned int _filter_buffer_size;
+    int _mode;
+    int _nb_echoes;
+    int _nb_echoes_old;
+    int _freq;
+    float _altitude;
+
+    struct echo _echoes[P7_US_MAX_ECHOES];
+    struct echo _echoes_old[P7_US_MAX_ECHOES];
+    struct echo *_echo_selected;
+
+    int apply_filter(void);
+    int search_echoes(void);
+    int match_echoes(void);
+    void get_echoes(void);
+    int process_echoes(void);
+    uint8_t echo_linear_test(struct echo *echoA, struct echo *echoB);
 
     int16_t _last_max_distance_cm;
     int16_t _last_min_distance_cm;

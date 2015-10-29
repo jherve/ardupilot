@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <sys/types.h>
+#include <stddef.h>
 
 namespace IIO {
 
@@ -148,6 +149,12 @@ struct iio_buffer * iio_device_create_buffer(const struct iio_device *dev,
         size_t samples_count, bool cyclic);
 void iio_context_destroy(struct iio_context *ctx);
 ssize_t iio_buffer_refill(struct iio_buffer *buffer);
+ptrdiff_t iio_buffer_step(const struct iio_buffer *buffer);
+void * iio_buffer_end(const struct iio_buffer *buffer);
+void * iio_buffer_first(const struct iio_buffer *buffer,
+        const struct iio_channel *chn);
+void iio_channel_convert(const struct iio_channel *chn,
+        void *dst, const void *src);
 
 
 #endif /* __AP_HAL_LINUX_IIO_H__ */
