@@ -21,7 +21,7 @@
 
 extern const AP_HAL::HAL& hal;
 
-#define ULOG(_fmt, ...)   fprintf(stderr, _fmt "\n", ##__VA_ARGS__)
+#define ULOG(_fmt, ...)   fprintf(stdout, _fmt "\n", ##__VA_ARGS__)
 /** Log as debug */
 #define ULOGD(_fmt, ...)  ULOG("[D]" _fmt, ##__VA_ARGS__)
 /** Log as info */
@@ -125,8 +125,10 @@ static unsigned short thresholds[2][2048] = {
  */
 int UltraSound_Bebop::launch_purge()
 {
+    printf("UltraSound_Bebop::launch_purge()\n");
     iio_device_attr_write(_adc.device, "buffer/enable", "1");
-    return ioctl(_spi_old.fd, SPI_IOC_MESSAGE(1), &_spi_old.tr_purge);
+    _spi->transfer(_purge, P7_US_NB_PULSES_PURGE);
+    return 0;
 }
 
 void UltraSound_Bebop::configure_gpio(int value)
@@ -159,6 +161,7 @@ void UltraSound_Bebop::configure_gpio(int value)
  */
 void UltraSound_Bebop::reconfigure_wave()
 {
+    printf("UltraSound_Bebop::reconfigure_wave()\n");
     /* configure the output buffer for a purge */
     /* perform a purge */
     if (launch_purge() < 0)
@@ -302,15 +305,18 @@ UltraSound_Bebop::UltraSound_Bebop()
 {
     _mode = P7_US_DEFAULT_MODE;
     _freq = P7_US_DEFAULT_FREQ;
+    _hysteresis_counter = 0;
     /* SPI can not be initialized just yet */
     _spi = nullptr;
     memset(_tx[0], 0xF0, 16);
     memset(_tx[1], 0xF0, 4);
     memset(_purge, 0xFF, P7_US_NB_PULSES_PURGE);
+    _tx_buf = _tx[_mode];
 }
 
 void UltraSound_Bebop::init()
 {
+    printf("UltraSound_Bebop::init()\n");
     _spi = hal.spi->device(AP_HAL::SPIDevice_BebopUltraSound);
     if (_spi == NULL) {
         hal.scheduler->panic("Could not find SPI device for Bebop ultrasound");
@@ -324,6 +330,8 @@ void UltraSound_Bebop::init()
 
     if (configure_wave() < 0)
         goto error_buffer_destroy;
+
+    return;
 
 error_buffer_destroy:
     iio_buffer_destroy(_adc.buffer);
@@ -340,11 +348,12 @@ error_free_us:
  */
 int UltraSound_Bebop::launch()
 {
-#if 0
-    iio_device_attr_write(_adc.device, "buffer/enable", "1");
+#ifdef OLD_SPI
     return ioctl(_spi_old.fd, SPI_IOC_MESSAGE(1), &_spi_old.tr);
 #endif
-    printf("Yep\n");
+    printf("UltraSound_Bebop::launch()\n");
+    iio_device_attr_write(_adc.device, "buffer/enable", "1");
+    _spi->transfer(_tx_buf, P7_US_NB_PULSES_MAX);
     return 0;
 }
 
@@ -355,10 +364,56 @@ int UltraSound_Bebop::launch()
 int UltraSound_Bebop::capture()
 {
     int ret;
+    printf("UltraSound_Bebop::capture()\n");
 
     ret = iio_buffer_refill(_adc.buffer);
     iio_device_attr_write(_adc.device, "buffer/enable", "0");
     return ret;
+}
+
+static int f_is_zero(const float f)
+{
+    return fabsf(f) < FLT_EPSILON;
+}
+
+
+void UltraSound_Bebop::update_mode(float altitude)
+{
+    printf("UltraSound_Bebop::update_mode()\n");
+    switch (_mode) {
+    case 0:
+        if (altitude < P7_US_TRANSITION_HIGH_TO_LOW
+                && !f_is_zero(altitude)) {
+            if (_hysteresis_counter
+                > P7_US_TRANSITION_COUNT) {
+                _mode = 1;
+                _hysteresis_counter = 0;
+                reconfigure_wave();
+            } else {
+                _hysteresis_counter++;
+            }
+        } else {
+            _hysteresis_counter = 0;
+        }
+        break;
+
+    default:
+    case 1:
+        if (altitude > P7_US_TRANSITION_LOW_TO_HIGH
+                || f_is_zero(altitude)) {
+            if (_hysteresis_counter
+                > P7_US_TRANSITION_COUNT) {
+                _mode = 0;
+                _hysteresis_counter = 0;
+                reconfigure_wave();
+            } else {
+                _hysteresis_counter++;
+            }
+        } else {
+            _hysteresis_counter = 0;
+        }
+        break;
+    }
 }
 
 UltraSound_Bebop::~UltraSound_Bebop()

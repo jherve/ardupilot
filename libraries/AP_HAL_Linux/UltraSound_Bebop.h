@@ -154,17 +154,20 @@ public:
     void init(void);
     int launch(void);
     int capture(void);
+    void update_mode(float altitude);
     void wave_test(unsigned int);
+    struct adc_info _adc;
 
 private:
-    struct adc_info _adc;
     struct spi_info _spi_old;
     AP_HAL::SPIDeviceDriver *_spi;
     struct iio_context *_iio;
     int _mode;
     int _freq;
     unsigned char _tx[2][P7_US_NB_PULSES_MAX];
-    char _purge[P7_US_NB_PULSES_PURGE];
+    unsigned char _purge[P7_US_NB_PULSES_PURGE];
+    unsigned char* _tx_buf;
+    int _hysteresis_counter;
 
     void configure_gpio(int value);
     int configure_wave();

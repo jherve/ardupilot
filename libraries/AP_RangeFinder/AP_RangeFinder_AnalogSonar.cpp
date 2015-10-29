@@ -61,6 +61,9 @@ bool AP_RangeFinder_AnalogSonar::detect(RangeFinder &_ranger, uint8_t instance)
 void AP_RangeFinder_AnalogSonar::update(void)
 {
     AP_HAL_Linux.ultraSound->launch();
+    AP_HAL_Linux.ultraSound->capture();
+    AP_HAL_Linux.ultraSound->update_mode(ranger.distance_cm() * 100);
+
 }
 
 
