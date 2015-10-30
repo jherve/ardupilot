@@ -21,6 +21,7 @@
 #include "RangeFinder_Backend.h"
 #include <AP_HAL_Linux/AP_HAL_Linux.h>
 
+#define RANGEFINDER_LOG
 /*
  * the number of echoes we will keep at most
  */
@@ -42,10 +43,22 @@ struct echo {
     uint16_t previous;
     int16_t d_echo;
 };
+class AP_RangeFinder_AnalogSonar;
 
+class RangeFinder_Log {
+private:
+    int _fd;
+    int _cpt;
+    const AP_RangeFinder_AnalogSonar &_rangefinder;
+public:
+    RangeFinder_Log(const AP_RangeFinder_AnalogSonar &ranger);
+    ~RangeFinder_Log();
+    void step();
+};
 
 class AP_RangeFinder_AnalogSonar : public AP_RangeFinder_Backend
 {
+    friend class RangeFinder_Log;
 public:
     // constructor
     AP_RangeFinder_AnalogSonar(RangeFinder &ranger,
@@ -62,6 +75,7 @@ public:
     void update(void);
 
 private:
+    RangeFinder_Log _log;
     UltraSound_Bebop *_ultrasound;
     struct adcCapture_t *_adcCapture;
     int _fd;

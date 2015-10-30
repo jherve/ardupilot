@@ -139,6 +139,7 @@ AP_RangeFinder_AnalogSonar::AP_RangeFinder_AnalogSonar(RangeFinder &_ranger,
     _last_max_distance_cm(-1),
     _last_min_distance_cm(-1),
     _last_timestamp(0),
+    _log(*this),
     _ultrasound(AP_HAL_Linux.ultraSound),
     _fd(-1),
     _mode(0),
@@ -665,9 +666,68 @@ void AP_RangeFinder_AnalogSonar::update(void)
     memcpy(_echoes_old, _echoes, P7_US_MAX_ECHOES * sizeof(struct echo));
     _nb_echoes_old = _nb_echoes;
     state.distance_cm = (uint16_t) (_altitude * 100);
+#ifdef RANGEFINDER_LOG
+    _log.step();
+#endif
     update_status();
     ULOGI("distance_cm : %u", ranger.distance_cm());
     _mode = _ultrasound->update_mode(ranger.distance_cm() * 100);
 }
 
+RangeFinder_Log::RangeFinder_Log(const AP_RangeFinder_AnalogSonar &ranger):
+        _rangefinder(ranger)
+{
+    const char *res_path = "/data/ftp/internal_000/log/us.log";
+    _fd = open(res_path, O_RDWR | O_CREAT | O_TRUNC,
+            S_IRWXU | S_IRWXG | S_IRWXO);
+    _cpt = 0;
+}
+RangeFinder_Log::~RangeFinder_Log()
+{
+    close(_fd);
+}
+void RangeFinder_Log::step()
+{
+    unsigned int i;
+    int size;
+    unsigned int tot_size = 0;
+    unsigned int nb_filter_sample = 8192 >> P7_US_FILTER_POWER;
+    unsigned int sample_size = 25;
+    char buffer[nb_filter_sample * sample_size];
 
+    memset(buffer, 0, sizeof(buffer));
+    for (i = 0; i < nb_filter_sample; i++) {
+        if (_rangefinder._filter_buffer[i] > 0 || sThresholds[_rangefinder._mode][i] > 1200) {
+            if (_rangefinder._echo_selected
+                && i == _rangefinder._echo_selected->max_idx) {
+                tot_size += snprintf(&buffer[tot_size],
+                    sizeof(buffer),
+                    "%d %d %d %d %f\n",
+                    _cpt,
+                    sThresholds[_rangefinder._mode][i],
+                    _rangefinder._filter_buffer[i],
+                    _rangefinder._echo_selected->max_value,
+                    _rangefinder._altitude * 10000);
+            } else {
+                tot_size += snprintf(&buffer[tot_size],
+                        sizeof(buffer),
+                        "%d %d %d 0 0.0\n",
+                        _cpt,
+                        sThresholds[_rangefinder._mode][i],
+                        _rangefinder._filter_buffer[i]);
+            }
+            _cpt++;
+        }
+    }
+
+    i = 0;
+    while (tot_size > 0) {
+        size = write(_fd, &buffer[i], tot_size);
+        if (size < 0)
+            break;
+        else {
+            tot_size -= size;
+            i += size;
+        }
+    }
+}
