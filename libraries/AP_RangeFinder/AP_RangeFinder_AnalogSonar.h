@@ -19,13 +19,20 @@
 
 #include "RangeFinder.h"
 #include "RangeFinder_Backend.h"
+#include <AP_HAL_Linux/AP_HAL_Linux.h>
 
 /*
  * the number of echoes we will keep at most
  */
 #define P7_US_MAX_ECHOES 30
+
 /*
- * struct related to ultrasoud echo
+ * value for echo processing
+ */
+#define P7_US_THRESHOLD_ECHO_INIT 1500
+
+/*
+ * struct related to ultrasound echo
  */
 struct echo {
     uint16_t start_idx;
@@ -55,6 +62,8 @@ public:
     void update(void);
 
 private:
+    UltraSound_Bebop *_ultrasound;
+    struct adcCapture_t *_adcCapture;
     int _fd;
     uint64_t _last_timestamp;
     unsigned short *_filter_buffer;

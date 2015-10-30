@@ -42,12 +42,10 @@ extern const AP_HAL::HAL& hal;
 /** Log as error */
 #define ULOGE(_fmt, ...)  ULOG("**** [E]" _fmt, ##__VA_ARGS__)
 
-
 /* flags to mark echoes */
 #define ECHO_REJECTED 0x20
 #define ECHO_PREVIOUS_BETTER 0x40
 #define ECHO_FOLLOWING_BETTER 0x80
-
 
 /* codecheck_ignore[COMPLEX_MACRO] */
 #define P2_1200 1200, 1200
@@ -141,10 +139,15 @@ AP_RangeFinder_AnalogSonar::AP_RangeFinder_AnalogSonar(RangeFinder &_ranger,
     _last_max_distance_cm(-1),
     _last_min_distance_cm(-1),
     _last_timestamp(0),
+    _ultrasound(AP_HAL_Linux.ultraSound),
     _fd(-1),
-    _mode(0)
+    _mode(0),
+    _nb_echoes(0),
+    _nb_echoes_old(0),
+    _altitude(0.0f),
+    _echo_selected(NULL)
 {
-    _filter_buffer_size = AP_HAL_Linux.ultraSound->get_buffer_size() >> P7_US_FILTER_POWER;
+    _filter_buffer_size = _ultrasound->get_buffer_size() >> P7_US_FILTER_POWER;
     _filter_buffer = (unsigned short*) calloc(1, sizeof(_filter_buffer[0]) * _filter_buffer_size);
     _freq = P7_US_DEFAULT_FREQ;
 }
@@ -162,10 +165,6 @@ AP_RangeFinder_AnalogSonar::~AP_RangeFinder_AnalogSonar()
  * @param echoB : test echoB with echo A
  * @return : 1 => echo A and echoB are the "same" echo 0
  * => echoA and echoB are two different echoes
- */
-/*
- * inherited from HAL_ultrasound_recup_number_echoes
- * Calculate the real number of echoes
  */
 uint8_t AP_RangeFinder_AnalogSonar::echo_linear_test(struct echo *echoA, struct echo *echoB)
 {
@@ -203,17 +202,17 @@ int AP_RangeFinder_AnalogSonar::apply_filter(void)
 
     /* initialise datas */
     memset(_filter_buffer, 0, _filter_buffer_size);
-    step = iio_buffer_step(AP_HAL_Linux.ultraSound->get_buffer());
-    end = (unsigned char *) iio_buffer_end(AP_HAL_Linux.ultraSound->get_buffer());
+    step = iio_buffer_step(_adcCapture->buffer);
+    end = (unsigned char *) iio_buffer_end(_adcCapture->buffer);
     filter_counter = 0;
     filter_power = P7_US_FILTER_POWER;
     filter_max = 1 << filter_power;
-    data_ptr = (unsigned char *) iio_buffer_first(AP_HAL_Linux.ultraSound->get_buffer(),
-                                AP_HAL_Linux.ultraSound->get_channel());
+    data_ptr = (unsigned char *) iio_buffer_first(_adcCapture->buffer,
+                                                    _adcCapture->channel);
 
     /* search first echo */
     while (data_ptr < end) {
-        iio_channel_convert(AP_HAL_Linux.ultraSound->get_channel(), &data, data_ptr);
+        iio_channel_convert(_adcCapture->channel, &data, data_ptr);
         data_ptr += step;
 
         if (data >= P7_US_THRESHOLD_ECHO_INIT) {
@@ -234,7 +233,7 @@ int AP_RangeFinder_AnalogSonar::apply_filter(void)
     /* search other echo by filtering datas
      * average is done on data gathered according to filter_max */
     while (data_ptr < end) {
-        iio_channel_convert(AP_HAL_Linux.ultraSound->get_channel(), &data, data_ptr);
+        iio_channel_convert(_adcCapture->channel, &data, data_ptr);
         data_ptr += step;
 
         _filter_buffer[filter_idx] += data;
@@ -273,18 +272,18 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
         CROSS_SEARCH,
         MAX_SEARCH,
         MIN_SEARCH,
-    } state = CROSS_SEARCH;
+    } search_state = CROSS_SEARCH;
 
     for (fb_idx = 0; fb_idx < _filter_buffer_size; fb_idx++) {
         delta = *fb_ptr - *thresholds;
-        switch (state) {
+        switch (search_state) {
         case CROSS_SEARCH:
         default:
             /* no echo if below thresholds */
             if (delta < 0)
                 break;
             /* new search a new max of echo */
-            state = MAX_SEARCH;
+            search_state = MAX_SEARCH;
             c = n;
             e[c].start_idx = fb_idx;
             e[c].previous = 0x8000;
@@ -307,7 +306,7 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
         case MAX_SEARCH:
             if (delta < 0) {
                 /* value is lower than thresholds no echo */
-                state = CROSS_SEARCH;
+                search_state = CROSS_SEARCH;
                 e[c].stop_idx = fb_idx;
             } else if (*fb_ptr > e[c].max_value) {
                 /* value is growing go on searching max */
@@ -315,7 +314,7 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
                 e[c].max_idx = fb_idx;
             } else if (*fb_ptr < e[c].max_value) {
                 /* new value is lower search min of echo */
-                state = MIN_SEARCH;
+                search_state = MIN_SEARCH;
                 e[c].stop_idx = fb_idx;
                 min = *fb_ptr;
             }
@@ -326,11 +325,11 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
 
             if (delta < 0) {
                 /* below thresholds no echo */
-                state = CROSS_SEARCH;
+                search_state = CROSS_SEARCH;
                 e[c].stop_idx = fb_idx;
             } else if (*fb_ptr > min) {
                 /* more than min search max */
-                state = MAX_SEARCH;
+                search_state = MAX_SEARCH;
                 c = n;
                 e[c].start_idx = fb_idx;
                 e[c].previous = 0x8000;
@@ -368,10 +367,8 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
 int AP_RangeFinder_AnalogSonar::match_echoes(void)
 {
     int16_t d_echo, d_test_echo;
-    /* TODO discover the meaning of this */
-    int16_t thres_delta_idx = 4 * 2 *
-        (AP_HAL_Linux.ultraSound->get_adc_freq())
-        / (P7_US_SOUND_SPEED * _freq);
+    int16_t thres_delta_idx = 4 * 2 * (_adcCapture->freq)
+                                / (P7_US_SOUND_SPEED * _freq);
     uint8_t nb_echoes = _nb_echoes;
     uint8_t nb_echoes_old = _nb_echoes_old;
 
@@ -389,9 +386,8 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
     p_end_echo_used = &_echoes[nb_echoes-1];
     p_end_echo_old_used = &_echoes_old[nb_echoes_old-1];
 
-    /* To succeed in matching we need to have a list of current echoes
-     * and the previous list of echoes, both non
-     * empty */
+    /* To succeed in matching we need to have a list of current echoes and the
+     * previous list of echoes, both non empty */
     ULOGD("nb_echoes %d nb_echoes_old %d", nb_echoes, nb_echoes_old);
     if (!nb_echoes || !nb_echoes_old) {
         while (p_end_echo_used >= p_echo_used) {
@@ -410,61 +406,47 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
         d_echo = p_echo_old_used->max_idx - p_echo_used->max_idx;
         /* .. with the echoes of the previous list. */
         while (previous_echo_idx < nb_echoes_old) {
-            /* We stop trying to match this current echo
-             * because all other echoes
-             * of the previous list
-             * will be further (echoes are stored
+            /* We stop trying to match this current echo because all other
+             * echoes of the previous list will be further (echoes are stored
              * in the lists from close to far.) */
             if (d_echo >= 0)
                 break;
 
-            /* distance to next echo
-             * of the previous list */
+            /* distance to next echo of the previous list */
             d_test_echo = p_test_echo->max_idx -
                 p_echo_used->max_idx;
 
             if (d_test_echo >= 0) {
-                /* We find two echoes
-                 * which surrounded p_echo_used */
+                /* We find two echoes which surrounded p_echo_used */
                 if (d_test_echo <= -d_echo) {
-                    /*The second echo
-                      of the two is closer */
+                    /*The second echo of the two is closer */
                     p_echo_old_used = p_test_echo++;
                     previous_echo_idx++;
                     d_echo = d_test_echo;
 
-                    /* we have found the best match
-                     * for the current echo
-                     * so we don't need to
-                     * keep this reference.  */
+                    /* we have found the best match for the current echo so we
+                     * don't need to keep this reference.  */
                     p_previous_echo = NULL;
                 } else {
-                    /* the first echo
-                     * of the two is closer
-                     * maybe next echo
-                     * of the current list
-                     * will be closer
-                     * to the refeso we keep it. */
+                    /* the first echo of the two is closer maybe next echo of
+                     * the current list will be closer to the reference so we
+                     * keep it. */
                     d_echo = -d_echo;
                 }
-                /* Matching is done
-                 * for the current echo */
+                /* Matching is done for the current echo */
                 break;
             } else {
-                /* we have to go on looking
-                 * for a closer echo
-                 * in the previous list. */
+                /* we have to go on looking for a closer echo in the previous
+                 * list. */
                 p_echo_old_used = p_test_echo++;
                 previous_echo_idx++;
                 d_echo = d_test_echo;
-                /* we don't keep the reference
-                 * on this echo of previous list. */
+                /* we don't keep the reference on this echo of previous list. */
                 p_previous_echo = NULL;
             }
         }
 
-        /* We store the best match
-         * for the current echo and the delta */
+        /* We store the best match for the current echo and the delta */
         p_echo_used->d_echo = d_echo;
         p_echo_used->previous = previous_echo_idx;
 
@@ -477,23 +459,18 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
                 p_echo_used++;
                 continue;
             }
-            /* we compare new match
-             * with the reference */
+            /* we compare new match with the reference */
             if (p_previous_echo->d_echo > p_echo_used->d_echo) {
-                /* the previous echo is tagged
-                 * as not so good */
+                /* the previous echo is tagged as not so good */
                 p_previous_echo->previous |=
                     ECHO_FOLLOWING_BETTER;
                 ULOGD("FOLLOWING BETTER");
-                /* if we are improving
-                 * the match that was already
-                 * recorded we replace it with
-                 * the improved one. */
+                /* if we are improving the match that was already recorded we
+                 * replace it with the improved one. */
                 if (p_detect == p_previous_echo)
                     p_detect = p_echo_used;
             } else {
-                /* the current echo is tagged
-                 * as not so good */
+                /* the current echo is tagged as not so good */
                 p_echo_used->previous |= ECHO_PREVIOUS_BETTER;
                 ULOGD("PREVIOUS BETTER");
             }
@@ -502,9 +479,8 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
             ULOGD("REJECTED");
         }
 
-        /* before proceeding with next echo
-         * of the current list we record
-         * this one as the new reference */
+        /* before proceeding with next echo of the current list we record this
+         * one as the new reference */
         p_previous_echo = p_echo_used;
         p_echo_used++;
     }
@@ -520,10 +496,8 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
 }
 
 /*
- * p7_us_process_echoes
- * this processing was initially done in Colibry compute_alt_measure
- * It takes the list of echoes
- * search the best echo and process altitude
+ * inherited from HAL_ultrasound_recup_number_echoes
+ * Calculate the real number of echoes
  */
 void AP_RangeFinder_AnalogSonar::get_echoes(void)
 {
@@ -536,7 +510,7 @@ void AP_RangeFinder_AnalogSonar::get_echoes(void)
     first_echo = echoes;
 
     uint16_t threshold_time = echoes->start_idx
-            + AP_HAL_Linux.ultraSound->get_threshold_time_rejection();
+            + _adcCapture->threshold_time_rejection;
 
 
     nb_peaks  = nb_echoes_temp = _nb_echoes;
@@ -588,6 +562,12 @@ void AP_RangeFinder_AnalogSonar::get_echoes(void)
     _nb_echoes = nb_echoes;
 }
 
+/*
+ * p7_us_process_echoes
+ * this processing was initially done in Colibry compute_alt_measure
+ * It takes the list of echoes
+ * search the best echo and process altitude
+ */
 int AP_RangeFinder_AnalogSonar::process_echoes(void)
 {
     uint8_t i;
@@ -615,8 +595,7 @@ int AP_RangeFinder_AnalogSonar::process_echoes(void)
             echo_max_idx = i;
         }
         if ((echo->previous & 0x1F) == echo_selected_idx) {
-            /* Research previous selected echo
-             * in current list */
+            /* Research previous selected echo in current list */
             dist = abs(echo->max_idx
                     - echo_selected->max_idx);
             if (dist < dist_min_tracked) {
@@ -672,8 +651,10 @@ bool AP_RangeFinder_AnalogSonar::detect(RangeFinder &_ranger, uint8_t instance)
 void AP_RangeFinder_AnalogSonar::update(void)
 {
     printf("%s\n", __func__);
-    AP_HAL_Linux.ultraSound->launch();
-    AP_HAL_Linux.ultraSound->capture();
+    _ultrasound->launch();
+    _ultrasound->capture();
+
+    _adcCapture = _ultrasound->get_capture();
 
     apply_filter();
     search_echoes();
@@ -683,9 +664,10 @@ void AP_RangeFinder_AnalogSonar::update(void)
 
     memcpy(_echoes_old, _echoes, P7_US_MAX_ECHOES * sizeof(struct echo));
     _nb_echoes_old = _nb_echoes;
-
-    _mode = AP_HAL_Linux.ultraSound->update_mode(ranger.distance_cm() * 100);
-
+    state.distance_cm = (uint16_t) (_altitude * 100);
+    update_status();
+    ULOGI("distance_cm : %u", ranger.distance_cm());
+    _mode = _ultrasound->update_mode(ranger.distance_cm() * 100);
 }
 
 

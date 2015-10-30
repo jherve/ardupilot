@@ -18,6 +18,21 @@
 #include "UltraSound_Bebop.h"
 #include "IIO.h"
 
+/*
+ * GPIO used to configure ultrasound level
+ */
+#define P7_US_PULSE_LEVEL_GPIO "/sys/class/gpio/gpio200/value"
+/*
+ * this mode is used at low altitude
+ * send 4 wave patterns
+ * gpio in low mode
+ */
+#define P7_US_DEFAULT_MODE 1
+
+/*
+ * the number of p7s in the iio buffer
+ */
+#define P7_US_P7_COUNT 8192
 
 extern const AP_HAL::HAL& hal;
 
@@ -77,8 +92,7 @@ void UltraSound_Bebop::reconfigure_wave()
         ULOGE("purge could not send data overspi");
     if (capture() < 0)
         ULOGE("purge could not capture data");
-    /* configure the output buffer with a new mode */
-    _spi_old.tr.tx_buf = (unsigned long)_spi_old.tx[_mode];
+
     switch (_mode) {
     case 1: /* low voltage */
         configure_gpio(0);
@@ -143,15 +157,6 @@ int UltraSound_Bebop::configure_capture()
         goto error_destroy_context;
     }
 
-    _adc.filter_buffer_size =
-        _adc.buffer_size >> P7_US_FILTER_POWER;
-    _adc.filter_buffer = (unsigned short *) calloc(1,
-            sizeof(_adc.filter_buffer[0])
-            * _adc.filter_buffer_size);
-    if (!_adc.filter_buffer) {
-        ULOGE("Fail to create filter buffer : %s", strerror(errno));
-        goto error_buffer_destroy;
-    }
     return 0;
 
 error_buffer_destroy:
@@ -163,22 +168,16 @@ error_destroy_context:
     return -1;
 }
 
-
-unsigned int UltraSound_Bebop::get_buffer_size()
-{
-    return _adc.buffer_size;
-}
-
 /*
  * Initialize the us
  */
 UltraSound_Bebop::UltraSound_Bebop()
 {
     _mode = P7_US_DEFAULT_MODE;
-    _freq = P7_US_DEFAULT_FREQ;
     _hysteresis_counter = 0;
-    /* SPI can not be initialized just yet */
+    /* SPI and IIO can not be initialized just yet */
     _spi = nullptr;
+    _iio = nullptr;
     memset(_tx[0], 0xF0, 16);
     memset(_tx[1], 0xF0, 4);
     memset(_purge, 0xFF, P7_US_NB_PULSES_PURGE);
@@ -241,33 +240,13 @@ static int f_is_zero(const float f)
     return fabsf(f) < FLT_EPSILON;
 }
 
-
-struct iio_buffer* UltraSound_Bebop::get_buffer()
-{
-    return _adc.buffer;
-}
-
-struct iio_channel* UltraSound_Bebop::get_channel()
-{
-    return _adc.channel;
-}
-unsigned short UltraSound_Bebop::get_threshold_time_rejection()
-{
-    return _adc.threshold_time_rejection;
-}
-unsigned int UltraSound_Bebop::get_adc_freq()
-{
-    return _adc.freq;
-}
-
 int UltraSound_Bebop::update_mode(float altitude)
 {
     switch (_mode) {
     case 0:
         if (altitude < P7_US_TRANSITION_HIGH_TO_LOW
                 && !f_is_zero(altitude)) {
-            if (_hysteresis_counter
-                > P7_US_TRANSITION_COUNT) {
+            if (_hysteresis_counter > P7_US_TRANSITION_COUNT) {
                 _mode = 1;
                 _hysteresis_counter = 0;
                 reconfigure_wave();
@@ -283,8 +262,7 @@ int UltraSound_Bebop::update_mode(float altitude)
     case 1:
         if (altitude > P7_US_TRANSITION_LOW_TO_HIGH
                 || f_is_zero(altitude)) {
-            if (_hysteresis_counter
-                > P7_US_TRANSITION_COUNT) {
+            if (_hysteresis_counter > P7_US_TRANSITION_COUNT) {
                 _mode = 0;
                 _hysteresis_counter = 0;
                 reconfigure_wave();
@@ -301,11 +279,8 @@ int UltraSound_Bebop::update_mode(float altitude)
 
 UltraSound_Bebop::~UltraSound_Bebop()
 {
-    close(_spi_old.fd);
     iio_buffer_destroy(_adc.buffer);
     _adc.buffer = NULL;
-    free(_adc.filter_buffer);
-    _adc.filter_buffer = NULL;
     iio_context_destroy(_iio);
     _iio = NULL;
 }
