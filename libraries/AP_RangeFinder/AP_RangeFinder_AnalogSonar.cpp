@@ -261,10 +261,7 @@ int AP_RangeFinder_AnalogSonar::apply_filter(void)
  */
 int AP_RangeFinder_AnalogSonar::search_echoes(void)
 {
-    unsigned short *thresholds = sThresholds[_mode];
-    unsigned int fb_idx;
-    unsigned short *fb_ptr = _filter_buffer;
-    short delta;
+    unsigned int i;
     uint16_t min = 0;
     struct echo *e = _echoes;
     unsigned int n = 0, c = 0;
@@ -275,8 +272,12 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
         MIN_SEARCH,
     } search_state = CROSS_SEARCH;
 
-    for (fb_idx = 0; fb_idx < _filter_buffer_size; fb_idx++) {
-        delta = *fb_ptr - *thresholds;
+
+    for (i = 0; i < _filter_buffer_size; i++) {
+        unsigned short signal = _filter_buffer[i];
+        unsigned short threshold = sThresholds[_mode][i];
+        short delta = signal - threshold;
+
         switch (search_state) {
         case CROSS_SEARCH:
         default:
@@ -286,18 +287,18 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
             /* new search a new max of echo */
             search_state = MAX_SEARCH;
             c = n;
-            e[c].start_idx = fb_idx;
+            e[c].start_idx = i;
             e[c].previous = 0x8000;
             e[c].d_echo = 0xFFF;
-            e[c].max_value = *fb_ptr;
-            e[c].max_idx = fb_idx;
+            e[c].max_value = signal;
+            e[c].max_idx = i;
             n++;
             ULOGD("CROSS_SEARCH found echo at idx %d"
                        " delta is %d = %d - %d",
-                fb_idx,
+                i,
                 delta,
-                *fb_ptr,
-                *thresholds);
+                signal,
+                threshold);
             if (n >= P7_US_MAX_ECHOES) {
                 _nb_echoes = n;
                 return 0;
@@ -308,42 +309,42 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
             if (delta < 0) {
                 /* value is lower than thresholds no echo */
                 search_state = CROSS_SEARCH;
-                e[c].stop_idx = fb_idx;
-            } else if (*fb_ptr > e[c].max_value) {
+                e[c].stop_idx = i;
+            } else if (signal > e[c].max_value) {
                 /* value is growing go on searching max */
-                e[c].max_value = *fb_ptr;
-                e[c].max_idx = fb_idx;
-            } else if (*fb_ptr < e[c].max_value) {
+                e[c].max_value = signal;
+                e[c].max_idx = i;
+            } else if (signal < e[c].max_value) {
                 /* new value is lower search min of echo */
                 search_state = MIN_SEARCH;
-                e[c].stop_idx = fb_idx;
-                min = *fb_ptr;
+                e[c].stop_idx = i;
+                min = signal;
             }
             break;
         case MIN_SEARCH:
-            if (*fb_ptr < min)
-                min = *fb_ptr;
+            if (signal < min)
+                min = signal;
 
             if (delta < 0) {
                 /* below thresholds no echo */
                 search_state = CROSS_SEARCH;
-                e[c].stop_idx = fb_idx;
-            } else if (*fb_ptr > min) {
+                e[c].stop_idx = i;
+            } else if (signal > min) {
                 /* more than min search max */
                 search_state = MAX_SEARCH;
                 c = n;
-                e[c].start_idx = fb_idx;
+                e[c].start_idx = i;
                 e[c].previous = 0x8000;
                 e[c].d_echo = 0xFFF;
-                e[c].max_value = *fb_ptr;
-                e[c].max_idx = fb_idx;
+                e[c].max_value = signal;
+                e[c].max_idx = i;
                 n++;
                 ULOGD("MIN_SEARCH found echo at idx %d"
                         "delta is %d = %d - %d",
-                        fb_idx,
+                        i,
                         delta,
-                        *fb_ptr,
-                        *thresholds);
+                        signal,
+                        threshold);
 
                 if (n >= P7_US_MAX_ECHOES) {
                     _nb_echoes = n;
@@ -352,8 +353,6 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
             }
             break;
         }
-        fb_ptr++;
-        thresholds++;
     }
     _nb_echoes = n;
     return 0;
@@ -367,6 +366,12 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
  */
 int AP_RangeFinder_AnalogSonar::match_echoes(void)
 {
+    struct echo local_echoes[P7_US_MAX_ECHOES];
+    struct echo local_old_echoes[P7_US_MAX_ECHOES];
+    int new_loop1_ctr = 0;
+    int new_loop2_ctr = 0;
+    int loop1_ctr = 0;
+    int loop2_ctr = 0;
     int16_t d_echo, d_test_echo;
     int16_t thres_delta_idx = 4 * 2 * (_adcCapture->freq)
                                 / (P7_US_SOUND_SPEED * _freq);
@@ -374,19 +379,21 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
     uint8_t nb_echoes_old = _nb_echoes_old;
 
     uint8_t previous_echo_idx = 0;
-    struct echo *p_detect = NULL;
+    struct echo *p_detect = NULL; int i_final = -1;
     struct echo *p_echo_used, *p_echo_old_used;
     struct echo *p_end_echo_used, *p_end_echo_old_used;
 
-    struct echo *p_previous_echo = NULL;
-    struct echo *p_test_echo = NULL;
+    struct echo *p_previous_echo = NULL; int i_candidate_echo = -1;
+    struct echo *p_test_echo = NULL; int i_current_old = -1;
 
-    p_echo_used = &_echoes[0];
-    p_echo_old_used = &_echoes_old[0];
+    p_echo_used = &_echoes[0]; int i_current_echo = 0;
+    p_echo_old_used = &_echoes_old[0]; int i_echo_old_used = 0;
 
-    p_end_echo_used = &_echoes[nb_echoes-1];
+    p_end_echo_used = &_echoes[nb_echoes-1]; int i_end_echo_used = nb_echoes - 1;
     p_end_echo_old_used = &_echoes_old[nb_echoes_old-1];
 
+    memcpy(local_echoes, _echoes, P7_US_MAX_ECHOES * sizeof(struct echo));
+    memcpy(local_old_echoes, _echoes_old, P7_US_MAX_ECHOES * sizeof(struct echo));
     /* To succeed in matching we need to have a list of current echoes and the
      * previous list of echoes, both non empty */
     ULOGD("nb_echoes %d nb_echoes_old %d", nb_echoes, nb_echoes_old);
@@ -397,11 +404,12 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
         }
         return 0;
     }
-
+#if 1
     p_test_echo = p_echo_old_used + 1;
 
     /* we try to match each echo of the current list... */
     while (p_end_echo_used >= p_echo_used) {
+        loop1_ctr++;
 
         /* distance to the echo of the previous list. */
         d_echo = p_echo_old_used->max_idx - p_echo_used->max_idx;
@@ -412,10 +420,28 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
              * in the lists from close to far.) */
             if (d_echo >= 0)
                 break;
+            loop2_ctr++;
+            int curr_index = ((unsigned char*)p_test_echo - (unsigned char*)_echoes_old)/(sizeof(struct echo));
+            ULOGD("Old looping : %d , %d, %d , %d , %d", (unsigned int)previous_echo_idx,
+                    curr_index,
+                    loop1_ctr, loop2_ctr, d_echo);
 
             /* distance to next echo of the previous list */
             d_test_echo = p_test_echo->max_idx -
                 p_echo_used->max_idx;
+
+            ULOGD("Old : d_test_echo = %d", d_test_echo);
+
+            if (d_test_echo >= 0) {
+                /* We find two echoes which surrounded p_echo_used */
+                if (d_test_echo <= -d_echo) {
+                    ULOGD("Old : Branch 1.1");
+                } else {
+                    ULOGD("Old : Branch 1.2");
+                }
+            } else {
+                ULOGD("Old : Branch 2");
+            }
 
             if (d_test_echo >= 0) {
                 /* We find two echoes which surrounded p_echo_used */
@@ -451,6 +477,27 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
         p_echo_used->d_echo = d_echo;
         p_echo_used->previous = previous_echo_idx;
 
+        if (p_echo_used->d_echo < thres_delta_idx) {
+            ULOGD("Old : Branch B 1");
+            if (p_detect == NULL) {
+                ULOGD("Old : Branch B 1.1");
+            }
+            if (p_previous_echo == NULL) {
+                ULOGD("Old : Branch B 1.1b");
+                goto if_exit;
+            }
+            if (p_previous_echo->d_echo > p_echo_used->d_echo) {
+                ULOGD("Old : Branch B 1.2.1");
+                if (p_detect == p_previous_echo) {
+                    ULOGD("Old : Branch B 1.2.1.1");
+                }
+            } else {
+                ULOGD("Old : Branch B 1.2.2");
+            }
+        } else {
+            ULOGD("Old : Branch B 2");
+        }
+if_exit:
         /* We check if the match is valid */
         if (p_echo_used->d_echo < thres_delta_idx) {
             if (p_detect == NULL)
@@ -493,6 +540,192 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
                 p_detect->previous,
                 p_detect->d_echo,
                 p_detect->max_idx);
+#endif
+    /* "Reference" version */
+    if(0) {
+        /* we try to match each echo of the current list... */
+        while(i_end_echo_used >= i_current_echo) {
+            new_loop1_ctr++;
+            d_echo = local_old_echoes[i_echo_old_used].max_idx - local_echoes[i_current_echo].max_idx;
+            /* .. with the echoes of the previous list. */
+            while (previous_echo_idx < nb_echoes_old) {
+                new_loop2_ctr++;
+                ULOGD("New looping : %d , %d , %d", previous_echo_idx, nb_echoes_old, new_loop2_ctr);
+                /* We stop trying to match this current echo because all other
+                 * echoes of the previous list will be further (echoes are stored
+                 * in the lists from close to far.) */
+                if (d_echo >= 0)
+                    break;
+
+                /* distance to next echo of the previous list */
+                d_test_echo = local_old_echoes[i_current_old].max_idx - local_echoes[i_current_echo].max_idx;
+
+                if (d_test_echo >= 0) {
+                    /* We find two echoes which surrounded p_echo_used */
+                    if (d_test_echo <= -d_echo) {
+                        /*The second echo of the two is closer */
+                        i_echo_old_used = i_current_old;
+                        i_current_old++;
+                        previous_echo_idx++;
+                        d_echo = d_test_echo;
+
+                        /* we have found the best match for the current echo so we
+                         * don't need to keep this reference.  */
+                        i_candidate_echo = -1;
+                    } else {
+                        /* the first echo of the two is closer maybe next echo of
+                         * the current list will be closer to the reference so we
+                         * keep it. */
+                        d_echo = -d_echo;
+                    }
+                    /* Matching is done for the current echo */
+                    break;
+                } else {
+                    /* we have to go on looking for a closer echo in the previous
+                     * list. */
+                    i_echo_old_used = i_current_old;
+                    i_current_old++;
+                    previous_echo_idx++;
+                    d_echo = d_test_echo;
+                    /* we don't keep the reference on this echo of previous list. */
+                    i_candidate_echo = -1;
+                }
+            }
+
+            /* We store the best match for the current echo and the delta */
+            local_echoes[i_current_echo].d_echo = d_echo;
+            local_echoes[i_current_echo].previous = previous_echo_idx;
+
+            /* We check if the match is valid */
+            if (local_echoes[i_current_echo].d_echo < thres_delta_idx) {
+                if (i_final < 0)
+                    i_final = i_current_echo;
+                if (i_candidate_echo < 0) {
+                    i_candidate_echo = i_current_echo;
+                    i_current_echo++;
+                    continue;
+                }
+
+                if (local_echoes[i_candidate_echo].d_echo > local_echoes[i_current_echo].d_echo) {
+                    local_echoes[i_candidate_echo].previous |= ECHO_FOLLOWING_BETTER;
+                    ULOGD("FOLLOWING BETTER");
+                    /* if we are improving the match that was already recorded we
+                     * replace it with the improved one. */
+                    if (i_final == i_candidate_echo)
+                        i_final = i_current_echo;
+                } else {
+                    local_echoes[i_candidate_echo].previous |= ECHO_PREVIOUS_BETTER;
+                    ULOGD("PREVIOUS BETTER");
+                }
+            } else {
+                local_echoes[i_candidate_echo].previous |= ECHO_REJECTED;
+                ULOGD("REJECTED");
+            }
+
+            /* before proceeding with next echo of the current list we record this
+             * one as the new reference */
+            i_candidate_echo = i_current_echo;
+            i_current_echo++;
+        }
+    }
+    /*********************************
+     * New implem'
+     */
+#if 1
+    previous_echo_idx = 0;
+
+    for (i_current_echo = 0; i_current_echo < nb_echoes; i_current_echo++) {
+        new_loop1_ctr++;
+        d_echo = local_old_echoes[i_echo_old_used].max_idx - local_echoes[i_current_echo].max_idx;
+            /* .. with the echoes of the previous list. */
+        d_test_echo = -1;
+        while (previous_echo_idx < nb_echoes_old && d_echo < 0 && d_test_echo < 0) {
+            new_loop2_ctr++;
+
+            ULOGD("New looping : %d , %d, %d , %d , %d", (unsigned int)previous_echo_idx,
+                    i_current_echo,
+                    new_loop1_ctr, new_loop2_ctr, d_echo);
+            /* distance to next echo of the previous list */
+            d_test_echo = local_old_echoes[previous_echo_idx + 1].max_idx - local_echoes[i_current_echo].max_idx;
+
+            ULOGD("New : d_test_echo = %d", d_test_echo);
+
+            if ((d_test_echo >= 0 && d_test_echo <= -d_echo)
+                    || d_test_echo < 0) {
+                /* we have to go on looking for a closer echo in the previous
+                 * list. */
+                previous_echo_idx++;
+                i_echo_old_used = previous_echo_idx;
+                d_echo = d_test_echo;
+                /* we don't keep the reference on this echo of previous list. */
+                i_candidate_echo = -1;
+            } else if (d_test_echo >= 0) {
+                d_echo = -d_echo;
+            }
+
+        }
+
+        /* We store the best match for the current echo and the delta */
+        local_echoes[i_current_echo].d_echo = d_echo;
+        local_echoes[i_current_echo].previous = previous_echo_idx;
+
+        /* We check if the match is valid */
+        if (local_echoes[i_current_echo].d_echo < thres_delta_idx) {
+            /* No echo had been found yet */
+            if (i_final < 0)
+                i_final = i_current_echo;
+
+            if (i_candidate_echo >= 0) {
+
+                if (local_echoes[i_candidate_echo].d_echo > local_echoes[i_current_echo].d_echo) {
+                    local_echoes[i_candidate_echo].previous |= ECHO_FOLLOWING_BETTER;
+                    ULOGD("FOLLOWING BETTER");
+                    /* if we are improving the match that was already recorded we
+                     * replace it with the improved one. */
+                    if (i_final == i_candidate_echo)
+                        i_final = i_current_echo;
+                } else {
+                    local_echoes[i_candidate_echo].previous |= ECHO_PREVIOUS_BETTER;
+                    ULOGD("PREVIOUS BETTER");
+                }
+            }
+        } else {
+            local_echoes[i_candidate_echo].previous |= ECHO_REJECTED;
+            ULOGD("REJECTED");
+        }
+
+        /* before proceeding with next echo of the current list we record this
+         * one as the new reference */
+        i_candidate_echo = i_current_echo;
+    }
+
+
+    if(i_final != -1) {
+        struct echo echo = local_echoes[i_final];
+        ULOGD("ECHO USED bei %d, eoi %d, mv %d, p 0x%x, de %d, pmi %d (2)",
+                echo.start_idx,
+                echo.stop_idx,
+                echo.max_value,
+                echo.previous,
+                echo.d_echo,
+                echo.max_idx);
+        ULOGD("Same echo ? %d", &_echoes[i_final] == p_detect);
+
+        ULOGD("Same number of loops ? %d (%d, %d => %d, %d)",
+                (loop1_ctr==new_loop1_ctr) && (loop2_ctr==new_loop2_ctr),
+                loop1_ctr, loop2_ctr, new_loop1_ctr, new_loop2_ctr);
+        if (&_echoes[i_final] != p_detect) {
+            ULOGE("Didn't detect the same echo");
+            exit(1);
+        }
+        if ((loop1_ctr!=new_loop1_ctr || loop2_ctr!=new_loop2_ctr) && loop2_ctr < 2097150) {
+            ULOGE("Didn't take the same nb of loops");
+            exit(1);
+        }
+
+    }
+#endif
+
     return 0;
 }
 
