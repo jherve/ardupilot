@@ -40,7 +40,8 @@ struct echo {
     uint16_t stop_idx;
     int32_t max_value;
     uint16_t max_idx;
-    uint16_t previous;
+    uint16_t state;
+    int prev_index;
     int16_t d_echo;
 };
 class AP_RangeFinder_AnalogSonar;

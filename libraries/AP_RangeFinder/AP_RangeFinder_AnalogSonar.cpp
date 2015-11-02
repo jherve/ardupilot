@@ -288,7 +288,8 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
             search_state = MAX_SEARCH;
             c = n;
             e[c].start_idx = i;
-            e[c].previous = 0x8000;
+            e[c].state = 0;
+            e[c].prev_index = -1;
             e[c].d_echo = 0xFFF;
             e[c].max_value = signal;
             e[c].max_idx = i;
@@ -334,7 +335,8 @@ int AP_RangeFinder_AnalogSonar::search_echoes(void)
                 search_state = MAX_SEARCH;
                 c = n;
                 e[c].start_idx = i;
-                e[c].previous = 0x8000;
+                e[c].state = 0;
+                e[c].prev_index = -1;
                 e[c].d_echo = 0xFFF;
                 e[c].max_value = signal;
                 e[c].max_idx = i;
@@ -399,13 +401,7 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
     /* To succeed in matching we need to have a list of current echoes and the
      * previous list of echoes, both non empty */
     ULOGD("nb_echoes %d nb_echoes_old %d", nb_echoes, nb_echoes_old);
-    if (!nb_echoes || !nb_echoes_old) {
-        while (p_end_echo_used >= p_echo_used) {
-            p_echo_used->previous = 0xFFB;
-            p_echo_used++;
-        }
-        return 0;
-    }
+
 #if 1
     p_test_echo = p_echo_old_used + 1;
 
@@ -466,7 +462,7 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
 
         /* We store the best match for the current echo and the delta */
         p_echo_used->d_echo = best_delta;
-        p_echo_used->previous = previous_echo_idx;
+        p_echo_used->prev_index = previous_echo_idx;
 
         /* We check if the match is valid */
         if (p_echo_used->d_echo < thres_delta_idx) {
@@ -480,7 +476,7 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
             /* we compare new match with the reference */
             if (p_previous_echo->d_echo > p_echo_used->d_echo) {
                 /* the previous echo is tagged as not so good */
-                p_previous_echo->previous |=
+                p_previous_echo->state |=
                     ECHO_FOLLOWING_BETTER;
                 ULOGD("FOLLOWING BETTER");
                 /* if we are improving the match that was already recorded we
@@ -489,11 +485,11 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
                     p_detect = p_echo_used;
             } else {
                 /* the current echo is tagged as not so good */
-                p_echo_used->previous |= ECHO_PREVIOUS_BETTER;
+                p_echo_used->state |= ECHO_PREVIOUS_BETTER;
                 ULOGD("PREVIOUS BETTER");
             }
         } else {
-            p_echo_used->previous |= ECHO_REJECTED;
+            p_echo_used->state |= ECHO_REJECTED;
             ULOGD("REJECTED");
         }
 
@@ -503,11 +499,10 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
         p_echo_used++;
     }
     if (p_detect) {
-        ULOGD("ECHO USED bei %d, eoi %d, mv %d, p 0x%x, de %d, pmi %d",
+        ULOGD("ECHO USED bei %d, eoi %d, mv %d, de %d, pmi %d",
                 p_detect->start_idx,
                 p_detect->stop_idx,
                 p_detect->max_value,
-                p_detect->previous,
                 p_detect->d_echo,
                 p_detect->max_idx);
         old_style_detect_index = ((unsigned char*)p_detect - (unsigned char*)local_echoes)/(sizeof(struct echo));
@@ -523,8 +518,10 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
     int i_old_echo = 0;
 
     if (!nb_echoes || !nb_echoes_old) {
-        for (i_current_echo = 0; i_current_echo < nb_echoes; i_current_echo++)
-            _echoes[i_current_echo].previous = 0xFFB;
+        for (i_current_echo = 0; i_current_echo < nb_echoes; i_current_echo++) {
+            _echoes[i_current_echo].state = 0xFFB;
+            _echoes[i_current_echo].prev_index = 0xFFB;
+        }
         return 0;
     }
 
@@ -563,7 +560,7 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
 
         /* We store the best match for the current echo and the delta */
         _echoes[i_current_echo].d_echo = best_delta;
-        _echoes[i_current_echo].previous = i_old_echo;
+        _echoes[i_current_echo].prev_index = i_old_echo;
 
         /* We check if the match is valid */
         if (_echoes[i_current_echo].d_echo < thres_delta_idx) {
@@ -573,19 +570,19 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
 
             if (candidate_echo) {
                 if (_echoes[i_current_echo - 1].d_echo > _echoes[i_current_echo].d_echo) {
-                    _echoes[i_current_echo - 1].previous |= ECHO_FOLLOWING_BETTER;
+                    _echoes[i_current_echo - 1].state |= ECHO_FOLLOWING_BETTER;
                     ULOGD("FOLLOWING BETTER");
                     /* if we are improving the match that was already recorded we
                      * replace it with the improved one. */
                     if (i_final == i_current_echo - 1)
                         i_final = i_current_echo;
                 } else {
-                    _echoes[i_current_echo - 1].previous |= ECHO_PREVIOUS_BETTER;
+                    _echoes[i_current_echo - 1].state |= ECHO_PREVIOUS_BETTER;
                     ULOGD("PREVIOUS BETTER");
                 }
             }
         } else {
-            _echoes[i_current_echo - 1].previous |= ECHO_REJECTED;
+            _echoes[i_current_echo - 1].state |= ECHO_REJECTED;
             ULOGD("REJECTED");
         }
 
@@ -597,11 +594,10 @@ int AP_RangeFinder_AnalogSonar::match_echoes(void)
 
     if(i_final != -1) {
         struct echo echo = _echoes[i_final];
-        ULOGD("ECHO USED bei %d, eoi %d, mv %d, p 0x%x, de %d, pmi %d (2)",
+        ULOGD("ECHO USED bei %d, eoi %d, mv %d, de %d, pmi %d (2)",
                 echo.start_idx,
                 echo.stop_idx,
                 echo.max_value,
-                echo.previous,
                 echo.d_echo,
                 echo.max_idx);
         ULOGD("Same echo ? %d", i_final == old_style_detect_index);
@@ -713,7 +709,7 @@ int AP_RangeFinder_AnalogSonar::process_echoes(void)
     int dist;
     for (i = 0; i < _nb_echoes; i++) {
         struct echo *echo = &_echoes[i];
-        if ((echo->previous & ECHO_REJECTED) != 0)
+        if ((echo->state & ECHO_REJECTED) != 0)
             continue;
         /* Test matching */
         nb_echo_matched++;
@@ -723,7 +719,7 @@ int AP_RangeFinder_AnalogSonar::process_echoes(void)
             echo_max = echo;
             echo_max_idx = i;
         }
-        if ((echo->previous & 0x1F) == echo_selected_idx) {
+        if (echo->prev_index == echo_selected_idx) {
             /* Research previous selected echo in current list */
             dist = abs(echo->max_idx
                     - echo_selected->max_idx);
