@@ -21,31 +21,25 @@
 #include "RangeFinder_Backend.h"
 #include <AP_HAL_Linux/AP_HAL_Linux.h>
 
-#define RANGEFINDER_LOG
+//#define RANGEFINDER_LOG
+
 /*
  * the number of echoes we will keep at most
  */
 #define P7_US_MAX_ECHOES 30
 
-/*
- * value for echo processing
- */
-#define P7_US_THRESHOLD_ECHO_INIT 1500
 
-/*
- * struct related to ultrasound echo
- */
-struct echo {
-    uint16_t start_idx;
-    uint16_t stop_idx;
-    int32_t max_value;
-    uint16_t max_idx;
-    uint16_t state;
-    int prev_index;
-    int16_t d_echo;
-};
 class AP_RangeFinder_AnalogSonar;
 
+struct echo {
+    int maxIndex; /* index in the capture buffer at which the maximum is reached */
+    int distanceIndex; /* index in the capture buffer at which the signal is for
+                            the first time above a fixed threshold below the
+                            maximum => this corresponds to the real distance
+                            that should be attributed to this echo */
+};
+
+#ifdef RANGEFINDER_LOG
 class RangeFinder_Log {
 private:
     int _fd;
@@ -56,10 +50,13 @@ public:
     ~RangeFinder_Log();
     void step();
 };
+#endif
 
 class AP_RangeFinder_AnalogSonar : public AP_RangeFinder_Backend
 {
+#ifdef RANGEFINDER_LOG
     friend class RangeFinder_Log;
+#endif
 public:
     // constructor
     AP_RangeFinder_AnalogSonar(RangeFinder &ranger,
@@ -76,29 +73,32 @@ public:
     void update(void);
 
 private:
+    const unsigned int thresholdEchoInit = 1500;
+    static unsigned short sWaveformMode0[14];
+    static unsigned short sWaveformMode1[32];
+
+#ifdef RANGEFINDER_LOG
     RangeFinder_Log _log;
+#endif
     UltraSound_Bebop *_ultrasound;
     struct adcCapture_t *_adcCapture;
-    int _fd;
     uint64_t _last_timestamp;
-    unsigned short *_filter_buffer;
-    unsigned int _filter_buffer_size;
+
     int _mode;
-    int _nb_echoes;
-    int _nb_echoes_old;
+    int _echoesNb;
     int _freq;
     float _altitude;
 
+    unsigned int *_filteredCapture;
+    unsigned int _filteredCaptureSize;
     struct echo _echoes[P7_US_MAX_ECHOES];
-    struct echo _echoes_old[P7_US_MAX_ECHOES];
-    struct echo *_echo_selected;
+    unsigned int _filterAverage;
 
-    int apply_filter(void);
-    int search_echoes(void);
-    int match_echoes(void);
-    void get_echoes(void);
-    int process_echoes(void);
-    uint8_t echo_linear_test(struct echo *echoA, struct echo *echoB);
+    unsigned short getThresholdAt(int iCapture);
+    int applyAveragingFilter(void);
+    int searchLocalMaxima(void);
+    int searchMaximaDistance(void);
+    int searchMaximumWithMaxAmplitude(void);
 
     int16_t _last_max_distance_cm;
     int16_t _last_min_distance_cm;
