@@ -21,7 +21,7 @@
 #include "RangeFinder_Backend.h"
 #include <AP_HAL_Linux/AP_HAL_Linux.h>
 
-//#define RANGEFINDER_LOG
+#define RANGEFINDER_LOG
 
 /*
  * the number of echoes we will keep at most
@@ -44,9 +44,9 @@ class RangeFinder_Log {
 private:
     int _fd;
     int _cpt;
-    const AP_RangeFinder_AnalogSonar &_rangefinder;
+    AP_RangeFinder_AnalogSonar &_rangefinder;
 public:
-    RangeFinder_Log(const AP_RangeFinder_AnalogSonar &ranger);
+    RangeFinder_Log(AP_RangeFinder_AnalogSonar &ranger);
     ~RangeFinder_Log();
     void step();
 };

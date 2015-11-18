@@ -266,10 +266,13 @@ void AP_RangeFinder_AnalogSonar::update(void)
         update_status();
         _mode = _ultrasound->update_mode(_altitude);
     }
+#ifdef RANGEFINDER_LOG
+    _log.step();
+#endif
 }
 
 #ifdef RANGEFINDER_LOG
-RangeFinder_Log::RangeFinder_Log(const AP_RangeFinder_AnalogSonar &ranger):
+RangeFinder_Log::RangeFinder_Log(AP_RangeFinder_AnalogSonar &ranger):
         _rangefinder(ranger)
 {
     const char *res_path = "/data/ftp/internal_000/log/us.log";
@@ -283,7 +286,7 @@ RangeFinder_Log::~RangeFinder_Log()
 }
 void RangeFinder_Log::step()
 {
-    unsigned int i;
+    int i;
     int size;
     unsigned int tot_size = 0;
     unsigned int nb_filter_sample = 8192 >> P7_US_FILTER_POWER;
@@ -292,24 +295,23 @@ void RangeFinder_Log::step()
 
     memset(buffer, 0, sizeof(buffer));
     for (i = 0; i < nb_filter_sample; i++) {
-        if (_rangefinder._filter_buffer[i] > 0 || sThresholds[_rangefinder._mode][i] > 1200) {
-            if (_rangefinder._echo_selected
-                && i == _rangefinder._echo_selected->max_idx) {
+        if (_rangefinder._filteredCapture[i] > 0 || (unsigned short)_rangefinder.getThresholdAt(i) > 1200) {
+            if (i == _rangefinder.searchMaximumWithMaxAmplitude()) {
                 tot_size += snprintf(&buffer[tot_size],
                     sizeof(buffer),
                     "%d %d %d %d %f\n",
                     _cpt,
-                    sThresholds[_rangefinder._mode][i],
-                    _rangefinder._filter_buffer[i],
-                    _rangefinder._echo_selected->max_value,
+                    _rangefinder.getThresholdAt(i),
+                    _rangefinder._filteredCapture[i],
+                    i,
                     _rangefinder._altitude * 10000);
             } else {
                 tot_size += snprintf(&buffer[tot_size],
                         sizeof(buffer),
                         "%d %d %d 0 0.0\n",
                         _cpt,
-                        sThresholds[_rangefinder._mode][i],
-                        _rangefinder._filter_buffer[i]);
+                        _rangefinder.getThresholdAt(i),
+                        _rangefinder._filteredCapture[i]);
             }
             _cpt++;
         }
