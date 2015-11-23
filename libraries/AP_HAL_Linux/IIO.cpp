@@ -1669,7 +1669,7 @@ static ssize_t read_all(void *dst, size_t len, int fd)
 static ssize_t local_read(const struct iio_device *dev,
         void *dst, size_t len, uint32_t *mask, size_t words)
 {
-    ssize_t ret;
+    ssize_t ret = -EIO;
     struct iio_device_pdata *pdata = dev->pdata;
     if (pdata->fd == -1)
         return -EBADF;
@@ -1687,12 +1687,12 @@ static ssize_t local_read(const struct iio_device *dev,
     memcpy(mask, dev->mask, words);
     ret = read_all(dst, len, pdata->fd);
 
-    return ret ? ret : -EIO;
+    return ret;
 }
 
 ssize_t iio_buffer_refill(struct iio_buffer *buffer)
 {
-    ssize_t read;
+    ssize_t read = 0;
     const struct iio_device *dev = buffer->dev;
 
     if (buffer->dev_is_high_speed) {

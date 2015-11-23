@@ -14,6 +14,8 @@ public:
     void run(int argc, char* const* argv, Callbacks* callbacks) const override;
 };
 
+HAL_Linux& get_HAL_Linux();
+
 extern const HAL_Linux AP_HAL_Linux;
 
 #endif // __AP_HAL_LINUX_CLASS_H__

@@ -67,9 +67,9 @@ SPIDeviceDriver SPIDeviceManager::_device[] = {
     SPIDeviceDriver(0, 0, AP_HAL::SPIDevice_RASPIO, SPI_MODE_3, 8, RPI_GPIO_7,  8*MHZ, 8*MHZ),
 };
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP
-LinuxSPIDeviceDriver LinuxSPIDeviceManager::_device[] = {
+SPIDeviceDriver SPIDeviceManager::_device[] = {
     /* MPU9250 is restricted to 1MHz for non-data and interrupt registers */
-    LinuxSPIDeviceDriver(1, 0, AP_HAL::SPIDevice_BebopUltraSound,    SPI_MODE_0, 8, SPI_CS_KERNEL,  320*KHZ, 320*KHZ),
+    SPIDeviceDriver(1, 0, AP_HAL::SPIDevice_BebopUltraSound,    SPI_MODE_0, 8, SPI_CS_KERNEL,  320*KHZ, 320*KHZ),
 };
 #else
 // empty device table

@@ -359,10 +359,6 @@ bool AP_GPS_NMEA::_term_complete()
             // unless it tells us otherwise.
             _last_GPVTG_ms = hal.scheduler->millis();
             _gps_data_good = true;
-        } else if (!strcmp_P(_term, _perdcrv_string)) {
-            _sentence_type = _GPS_SENTENCE_PERDCRV;
-            _gps_data_good = true;
-            _have_perdcrv = true;
         } else {
             _sentence_type = _GPS_SENTENCE_OTHER;
         }

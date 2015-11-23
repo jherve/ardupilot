@@ -63,7 +63,7 @@ AP_RangeFinder_AnalogSonar::AP_RangeFinder_AnalogSonar(RangeFinder &_ranger,
 #ifdef RANGEFINDER_LOG
     _log(*this),
 #endif
-    _ultrasound(AP_HAL_Linux.ultraSound),
+    _ultrasound(get_HAL_Linux().ultraSound),
     _adcCapture(NULL),
     _mode(0),
     _echoesNb(0),

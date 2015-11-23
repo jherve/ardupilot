@@ -149,7 +149,7 @@ static Empty::EmptyRCOutput rcoutDriver;
 static UltraSound_Bebop ultraSoundInstance;
 #endif
 
-static LinuxScheduler schedulerInstance;
+static Scheduler schedulerInstance;
 
 HAL_Linux::HAL_Linux() :
     AP_HAL::HAL(
@@ -288,6 +288,11 @@ void HAL_Linux::run(int argc, char* const argv[], Callbacks* callbacks) const
 const AP_HAL::HAL& AP_HAL::get_HAL() {
     static const HAL_Linux hal;
     return hal;
+}
+
+HAL_Linux& get_HAL_Linux() {
+    const AP_HAL::HAL& hal = AP_HAL::get_HAL();
+    return (HAL_Linux&) hal;
 }
 
 #endif

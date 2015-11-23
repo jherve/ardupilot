@@ -14,9 +14,7 @@ WARNFLAGS      +=   -Wwrite-strings -Wformat=2
 WARNFLAGSCXX    = -Wno-reorder \
 	-Werror=format-security \
 	-Werror=array-bounds \
-	-Wfatal-errors \
 	-Werror=unused-but-set-variable \
-	-Werror=uninitialized \
 	-Werror=init-self \
 	-Wno-missing-field-initializers
 DEPFLAGS        =   -MD -MT $@
