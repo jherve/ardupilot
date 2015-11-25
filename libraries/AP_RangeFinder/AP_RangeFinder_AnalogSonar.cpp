@@ -244,10 +244,12 @@ int AP_RangeFinder_AnalogSonar::searchMaximumWithMaxAmplitude(void)
 
 void AP_RangeFinder_AnalogSonar::update(void)
 {
+    static bool outOfFirstLoop = false;
     int maxIndex;
-    _ultrasound->launch();
-    _ultrasound->capture();
 
+    if (outOfFirstLoop)
+        _ultrasound->capture();
+    outOfFirstLoop = true;
     _adcCapture = _ultrasound->get_capture();
 
     if (applyAveragingFilter() < 0)
@@ -261,11 +263,12 @@ void AP_RangeFinder_AnalogSonar::update(void)
     ULOGD("Index of max : %d", maxIndex);
     if (maxIndex >= 0) {
         _altitude = (float)(maxIndex * P7_US_SOUND_SPEED) / (2 * (P7_US_DEFAULT_ADC_FREQ / _filterAverage));
-        ULOGI("final alt %f, mode = %d", _altitude, _mode);
         state.distance_cm = (uint16_t) (_altitude * 100);
         update_status();
         _mode = _ultrasound->update_mode(_altitude);
     }
+    _ultrasound->launch();
+    ULOGI("final alt %f, mode = %d", _altitude, _mode);
 #ifdef RANGEFINDER_LOG
     _log.step();
 #endif
