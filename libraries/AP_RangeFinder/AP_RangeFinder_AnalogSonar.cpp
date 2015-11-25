@@ -246,20 +246,27 @@ void AP_RangeFinder_AnalogSonar::update(void)
 {
     static bool outOfFirstLoop = false;
     int maxIndex;
+    int32_t start = AP_HAL::get_HAL().scheduler->micros();
+    int32_t capture, average, localmax, maxdist, maxwithmax, update, end;
 
     if (outOfFirstLoop)
         _ultrasound->capture();
     outOfFirstLoop = true;
     _adcCapture = _ultrasound->get_capture();
+    capture = AP_HAL::get_HAL().scheduler->micros() - start;
 
     if (applyAveragingFilter() < 0)
         ULOGW("Could not apply averaging filter");
+    average = AP_HAL::get_HAL().scheduler->micros() - start;
     if (searchLocalMaxima() < 0)
         ULOGW("Did not find any local maximum");
+    localmax = AP_HAL::get_HAL().scheduler->micros() - start;
     if (searchMaximaDistance() < 0)
         ULOGW("Maxima distance did not find anything");
+    maxdist = AP_HAL::get_HAL().scheduler->micros() - start;
 
     maxIndex = searchMaximumWithMaxAmplitude();
+    maxwithmax = AP_HAL::get_HAL().scheduler->micros() - start;
     ULOGD("Index of max : %d", maxIndex);
     if (maxIndex >= 0) {
         _altitude = (float)(maxIndex * P7_US_SOUND_SPEED) / (2 * (P7_US_DEFAULT_ADC_FREQ / _filterAverage));
@@ -267,8 +274,12 @@ void AP_RangeFinder_AnalogSonar::update(void)
         update_status();
         _mode = _ultrasound->update_mode(_altitude);
     }
+    update = AP_HAL::get_HAL().scheduler->micros() - start;
     _ultrasound->launch();
+
+    end = AP_HAL::get_HAL().scheduler->micros() - start;
     ULOGI("final alt %f, mode = %d", _altitude, _mode);
+    ULOGI("capture %d, average %d, localmax %d, maxdist %d, maxwithmax %d, update %d, end %d", capture, average, localmax, maxdist, maxwithmax, update, end);
 #ifdef RANGEFINDER_LOG
     _log.step();
 #endif
