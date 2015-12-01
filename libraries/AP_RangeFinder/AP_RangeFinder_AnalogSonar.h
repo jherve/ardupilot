@@ -20,6 +20,8 @@
 #include "RangeFinder.h"
 #include "RangeFinder_Backend.h"
 #include <AP_HAL_Linux/AP_HAL_Linux.h>
+#include <AP_HAL_Linux/Semaphores.h>
+#include <pthread.h>
 
 #define RANGEFINDER_LOG
 
@@ -88,6 +90,9 @@ private:
     int _echoesNb;
     int _freq;
     float _altitude;
+    Linux::Semaphore _semCapture;
+    Linux::Semaphore _semMeasure;
+    pthread_t _thread;
 
     unsigned int *_filteredCapture;
     unsigned int _filteredCaptureSize;
@@ -99,6 +104,8 @@ private:
     int searchLocalMaxima(void);
     int searchMaximaDistance(void);
     int searchMaximumWithMaxAmplitude(void);
+    void loop(void);
+    static void* thread(void* arg);
 
     int16_t _last_max_distance_cm;
     int16_t _last_min_distance_cm;

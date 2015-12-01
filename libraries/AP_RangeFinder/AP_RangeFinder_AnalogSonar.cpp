@@ -23,6 +23,7 @@
 #include <sys/types.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include <stdio.h>
 #include <errno.h>
@@ -32,15 +33,15 @@
 
 extern const AP_HAL::HAL& hal;
 
-#define ULOG(_fmt, ...)   fprintf(stdout, _fmt "\n", ##__VA_ARGS__)
+#define LOG(_fmt, ...)   fprintf(stdout, _fmt "\n", ##__VA_ARGS__)
 /** Log as debug */
-#define ULOGD(_fmt, ...)  ULOG("**** [D]" _fmt, ##__VA_ARGS__)
+#define LOGD(_fmt, ...)  //LOG("**** [D]" _fmt, ##__VA_ARGS__)
 /** Log as info */
-#define ULOGI(_fmt, ...)  ULOG("**** [I]" _fmt, ##__VA_ARGS__)
+#define LOGI(_fmt, ...)  LOG("**** [I]" _fmt, ##__VA_ARGS__)
 /** Log as warning */
-#define ULOGW(_fmt, ...)  ULOG("**** [W]" _fmt, ##__VA_ARGS__)
+#define LOGW(_fmt, ...)  LOG("**** [W]" _fmt, ##__VA_ARGS__)
 /** Log as error */
-#define ULOGE(_fmt, ...)  ULOG("**** [E]" _fmt, ##__VA_ARGS__)
+#define LOGE(_fmt, ...)  LOG("**** [E]" _fmt, ##__VA_ARGS__)
 
 unsigned short AP_RangeFinder_AnalogSonar::sWaveformMode0[14] = {
     4000, 3800, 3600, 3400, 3200, 3000, 2800,
@@ -68,11 +69,15 @@ AP_RangeFinder_AnalogSonar::AP_RangeFinder_AnalogSonar(RangeFinder &_ranger,
     _mode(0),
     _echoesNb(0),
     _altitude(0.0f),
+    _thread(NULL),
     _filterAverage(4)
 {
+    LOGI("AP_RangeFinder_AnalogSonar::AP_RangeFinder_AnalogSonar");
     _freq = P7_US_DEFAULT_FREQ;
     _filteredCaptureSize = _ultrasound->get_buffer_size() / _filterAverage;
     _filteredCapture = (unsigned int*) calloc(1, sizeof(_filteredCapture[0]) * _filteredCaptureSize);
+    LOGI("_ultraSound init : %x", &_ultrasound);
+
 }
 
 AP_RangeFinder_AnalogSonar::~AP_RangeFinder_AnalogSonar()
@@ -97,7 +102,7 @@ unsigned short AP_RangeFinder_AnalogSonar::getThresholdAt(int iCapture)
      *
      *            on this part
      *            of the capture
-     *             we use
+     *  amplitude  we use
      *      ^     the waveform
      *      |     <---------->
      * 4195 +-----+
@@ -106,8 +111,8 @@ unsigned short AP_RangeFinder_AnalogSonar::getThresholdAt(int iCapture)
      *      |
      *      |
      *  1200|                 +----------------+
-     *    +---------------------------------->
-     *      +    low         high
+     *    +-------------------------------------->
+     *      +    low         high               time
      *           limit       limit
      *
      *  */
@@ -192,7 +197,7 @@ int AP_RangeFinder_AnalogSonar::searchLocalMaxima(void)
 
             if (curr > prev && curr > next) {
                 _echoes[iEcho].maxIndex = iCapture;
-                ULOGD("found local max at index %d : %d", iCapture, curr);
+                LOGD("found local max at index %d : %d", iCapture, curr);
                 iEcho++;
                 if (iEcho >= P7_US_MAX_ECHOES)
                     break;
@@ -216,7 +221,7 @@ int AP_RangeFinder_AnalogSonar::searchMaximaDistance(void)
             iCapture--;
             c_value = _filteredCapture[iCapture];
         } while(c_value >= target);
-        ULOGD("Found crossing at %d : %d", iCapture, _filteredCapture[iCapture]);
+        LOGD("Found crossing at %d : %d", iCapture, _filteredCapture[iCapture]);
         _echoes[iEcho].distanceIndex = iCapture;
     }
 
@@ -242,47 +247,100 @@ int AP_RangeFinder_AnalogSonar::searchMaximumWithMaxAmplitude(void)
         return -1;
 }
 
-void AP_RangeFinder_AnalogSonar::update(void)
+void AP_RangeFinder_AnalogSonar::loop(void)
 {
     static bool outOfFirstLoop = false;
     int maxIndex;
-    int32_t start = AP_HAL::get_HAL().scheduler->micros();
-    int32_t capture, average, localmax, maxdist, maxwithmax, update, end;
 
-    if (outOfFirstLoop)
+    while(1) {
+        /* Wait for the semaphore that will be given when the "update" function
+         * is over */
+        _semCapture.take(0);
+        int32_t start = AP_HAL::get_HAL().scheduler->micros();
+        int32_t launch, capture, average, localmax, maxdist, maxwithmax, update, end;
+        _ultrasound->launch();
+        launch = AP_HAL::get_HAL().scheduler->micros() - start;
         _ultrasound->capture();
-    outOfFirstLoop = true;
-    _adcCapture = _ultrasound->get_capture();
-    capture = AP_HAL::get_HAL().scheduler->micros() - start;
+        _adcCapture = _ultrasound->get_capture();
 
-    if (applyAveragingFilter() < 0)
-        ULOGW("Could not apply averaging filter");
-    average = AP_HAL::get_HAL().scheduler->micros() - start;
-    if (searchLocalMaxima() < 0)
-        ULOGW("Did not find any local maximum");
-    localmax = AP_HAL::get_HAL().scheduler->micros() - start;
-    if (searchMaximaDistance() < 0)
-        ULOGW("Maxima distance did not find anything");
-    maxdist = AP_HAL::get_HAL().scheduler->micros() - start;
+        capture = AP_HAL::get_HAL().scheduler->micros() - start;
 
-    maxIndex = searchMaximumWithMaxAmplitude();
-    maxwithmax = AP_HAL::get_HAL().scheduler->micros() - start;
-    ULOGD("Index of max : %d", maxIndex);
-    if (maxIndex >= 0) {
-        _altitude = (float)(maxIndex * P7_US_SOUND_SPEED) / (2 * (P7_US_DEFAULT_ADC_FREQ / _filterAverage));
-        state.distance_cm = (uint16_t) (_altitude * 100);
-        update_status();
-        _mode = _ultrasound->update_mode(_altitude);
-    }
-    update = AP_HAL::get_HAL().scheduler->micros() - start;
-    _ultrasound->launch();
+        if (applyAveragingFilter() < 0) {
+            LOGW("Could not apply averaging filter");
+            goto endloop;
+        }
+        average = AP_HAL::get_HAL().scheduler->micros() - start;
+        if (searchLocalMaxima() < 0) {
+            LOGW("Did not find any local maximum");
+            goto endloop;
+        }
+        localmax = AP_HAL::get_HAL().scheduler->micros() - start;
+        if (searchMaximaDistance() < 0) {
+            LOGW("Maxima distance did not find anything");
+            goto endloop;
+        }
+        maxdist = AP_HAL::get_HAL().scheduler->micros() - start;
 
-    end = AP_HAL::get_HAL().scheduler->micros() - start;
-    ULOGI("final alt %f, mode = %d", _altitude, _mode);
-    ULOGI("capture %d, average %d, localmax %d, maxdist %d, maxwithmax %d, update %d, end %d", capture, average, localmax, maxdist, maxwithmax, update, end);
+        maxIndex = searchMaximumWithMaxAmplitude();
+        maxwithmax = AP_HAL::get_HAL().scheduler->micros() - start;
+        LOGD("Index of max : %d", maxIndex);
+        if (maxIndex >= 0) {
+            _altitude = (float)(maxIndex * P7_US_SOUND_SPEED) / (2 * (P7_US_DEFAULT_ADC_FREQ / _filterAverage));
+            _mode = _ultrasound->update_mode(_altitude);
+        }
+        update = AP_HAL::get_HAL().scheduler->micros() - start;
+
+endloop:
+
 #ifdef RANGEFINDER_LOG
-    _log.step();
+        _log.step();
 #endif
+        end = AP_HAL::get_HAL().scheduler->micros() - start;
+        //_semAltitude.give();
+        LOGI("final alt %f, mode = %d", _altitude, _mode);
+        LOGI("launch %d, capture %d, average %d, localmax %d, maxdist %d, maxwithmax %d, update %d, end %d", launch, capture, average, localmax, maxdist, maxwithmax, update, end);
+    }
+}
+
+void* AP_RangeFinder_AnalogSonar::thread(void* arg)
+{
+    AP_RangeFinder_AnalogSonar *sonar = (AP_RangeFinder_AnalogSonar*) arg;
+
+    sonar->loop();
+
+    return NULL;
+}
+
+void AP_RangeFinder_AnalogSonar::update(void)
+{
+    static bool firstCall = true;
+    int32_t start = AP_HAL::get_HAL().scheduler->micros();
+
+    if (firstCall) {
+        int ret;
+        pthread_attr_t attr;
+        struct sched_param param = { 14 };
+
+        ret = pthread_attr_init(&attr);
+        if (ret != 0) {
+            perror("RCOut_Bebop: failed to init attr\n");
+            return;
+        }
+        pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED);
+        pthread_attr_setschedpolicy(&attr, SCHED_FIFO);
+        pthread_attr_setschedparam(&attr, &param);
+        ret = pthread_create(&_thread, &attr, AP_RangeFinder_AnalogSonar::thread, this);
+        LOGI("AP_RangeFinder_AnalogSonar::AP_RangeFinder_AnalogSonar : %d", ret);
+        firstCall = false;
+    }
+
+    //_semAltitude.take(0);
+    state.distance_cm = (uint16_t) (_altitude * 100);
+    update_status();
+    /* Let the secondary thread launch the ultrasound capture */
+    _semCapture.give();
+    int32_t end = AP_HAL::get_HAL().scheduler->micros() - start;
+    LOGI("******************************************** update took %d", end);
 }
 
 #ifdef RANGEFINDER_LOG
