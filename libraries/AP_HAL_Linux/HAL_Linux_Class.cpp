@@ -145,6 +145,10 @@ static RCOutput_PCA9685 rcoutDriver(PCA9685_PRIMARY_ADDRESS, false, 0, MINNOW_GP
 static Empty::EmptyRCOutput rcoutDriver;
 #endif
 
+#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP
+static UltraSound_Bebop ultraSoundInstance;
+#endif
+
 static Scheduler schedulerInstance;
 
 HAL_Linux::HAL_Linux() :
@@ -175,7 +179,8 @@ HAL_Linux::HAL_Linux() :
         &rcinDriver,
         &rcoutDriver,
         &schedulerInstance,
-        &utilInstance)
+        &utilInstance),
+    ultraSound(&ultraSoundInstance)
 {}
 
 void _usage(void)
@@ -264,6 +269,9 @@ void HAL_Linux::run(int argc, char* const argv[], Callbacks* callbacks) const
     uartA->begin(115200);    
     uartE->begin(115200);    
     analogin->init(NULL);
+#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP
+    ultraSound->init();
+#endif
     utilInstance.init(argc+gopt.optind-1, &argv[gopt.optind-1]);
 
     // NOTE: See commit 9f5b4ffca ("AP_HAL_Linux_Class: Correct
@@ -280,6 +288,11 @@ void HAL_Linux::run(int argc, char* const argv[], Callbacks* callbacks) const
 const AP_HAL::HAL& AP_HAL::get_HAL() {
     static const HAL_Linux hal;
     return hal;
+}
+
+HAL_Linux& get_HAL_Linux() {
+    const AP_HAL::HAL& hal = AP_HAL::get_HAL();
+    return (HAL_Linux&) hal;
 }
 
 #endif
